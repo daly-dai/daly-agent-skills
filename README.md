@@ -8,14 +8,18 @@
 
 | 技能 | 说明 | 触发词示例 |
 |------|------|-----------|
+| [component-ai-docs](component-ai-docs/) | 让 AI 认识你的组件——不管来自 npm 包还是历史项目的存量代码。两条路线：(A) 为新组件库生成 AI 可消费文档并打包进 npm；(B) 盘活历史项目的存量组件 | 组件文档、AI组件文档、组件库文档、盘活组件、提取组件API、让AI认识组件 |
 | [editorial-deck-design](editorial-deck-design/) | 顶尖创意热店级 PPT 视觉提案排版，以全球顶尖创意热店的视觉水准生成幻灯片排版指令，消除模板感与 AI 塑料感 | PPT 排版、视觉提案、幻灯片设计 |
 | [vue-doc-extractor](vue-doc-extractor/) | 从 Vue 3 页面组件中提取框架无关的产品文档，支持查询列表、表单、详情页、审批流、整模块等场景 | 提取文档、vue文档提取、模块文档提取 |
 | [red-team-arch-advisor](red-team-arch-advisor/) | 架构对抗顾问，用真实行业案例挑战设计方案，拓宽架构视野，提供针对性辅导建议 | 架构评审、架构挑战、红队审查、技术方案评审 |
+| [baby-product-advisor](baby-product-advisor/) | 科学育儿消费决策助手，帮助新手父母理性判断母婴产品是否需要买、买哪个、有无平替、是否安全 | 待产包、需要买什么、新生儿囤货、智商税、母婴税、安全吗、二手、闲鱼、坐月子 |
 
 ## 目录结构
 
 ```
 agent-skills/
+├── component-ai-docs/
+│   └── SKILL.md                 # 组件 AI 文档化技能
 ├── editorial-deck-design/
 │   └── SKILL.md                 # PPT 视觉提案排版技能
 ├── vue-doc-extractor/
@@ -38,6 +42,15 @@ agent-skills/
     └── references/
         ├── search-strategies.md     # 活水检索策略手册
         └── industry-cases.md        # 行业案例速查弹药库
+└── baby-product-advisor/
+    ├── SKILL.md                 # 科学育儿消费决策助手
+    └── references/
+        ├── stage-checklist.md       # 分阶段必需品清单
+        ├── safety-standards.md      # GB标准 + 有害成分黑名单
+        ├── scam-tax-list.md         # 智商税避坑清单
+        ├── secondhand-guide.md      # 二手安全分级指南
+        ├── seasonal-guide.md        # 7月夏季宝宝季节适配
+        └── budget-framework.md      # 预算规划框架
 ```
 
 ## 使用方式
@@ -45,6 +58,15 @@ agent-skills/
 将本仓库克隆到本地后，在 Qoder 等支持 Agent Skills 的 AI 编程助手中配置技能目录路径即可。技能会根据对话中的触发词自动激活。
 
 ## 技能简介
+
+### component-ai-docs
+
+让 AI 认识业务组件库或项目组件。核心价值：
+
+- **两条路线** -- (A) 为 npm 组件库生成 AI 可消费文档，随版本发布，消费者安装后 AI 自动认识；(B) 盘活历史项目的存量组件，自动提取类型 + 推导使用边界 + 生成文档
+- **metadata.json 标准** -- 定义 `useWhen`/`dontUseWhen`/`prefer` 三段式组件使用边界，只有人能写对、AI 最需要的信息
+- **JSDoc 写给 AI 看** -- 区分"写给人看的注释"和"写给 AI 看的注释"，给出具体写作规范
+- **格式统一** -- 不管来源，最终产出的 `ai/` 目录结构一致，AI 消费方式一样
 
 ### editorial-deck-design
 
@@ -63,3 +85,15 @@ agent-skills/
 - 绝不默认同意，用尖锐问题深挖盲区
 - 引入外部行业案例与替代方案
 - 基于真实故障分析论证风险
+
+### baby-product-advisor
+
+帮助新手父母在混乱的母婴市场中做出理性消费决策。核心价值：
+
+- **反营销洗脑** — 识别"母婴专用"定价陷阱，判断产品是否存在同材质便宜替代品
+- **阶段化清单** — 待产包 → 0-1月 → 1-3月 → 3-6月 → 6-12月，按必需品/可选品/不必买分类
+- **安全标准速查** — 对照中国 GB 标准、3C 认证、有害成分黑名单进行安全判定
+- **智商税避坑** — 经典智商税产品（婴儿水、学步车、定型枕、防辐射服等）完整清单
+- **二手安全分级** — 🟢安全二手 / 🟡有条件 / 🔴必须全新，使用周期标注
+- **季节适配** — 按出生月份自动适配服装、护肤、防痱、蚊虫策略
+- **预算规划** — 三档预算框架（最低/舒适/宽裕），标注可省钱方向
