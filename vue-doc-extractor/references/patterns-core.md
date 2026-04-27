@@ -89,7 +89,8 @@ formData.dept = { label: res.data.deptName, value: res.data.deptId }  // 合并
 
 | 来源类型 | 代码模式 | 记录方式 |
 |---------|---------|---------|
-| 静态定义 | `[{label:'启用',value:1}]` | 列出所有选项 |
+| 静态定义（内联） | `[{label:'启用',value:1}]` | 列出所有选项 |
+| 静态定义（外部常量） | `import { OPTIONS } from './constants'` | 标注 `[常量]`，内联实际值（见第8节） |
 | API 加载 | `onMounted→fetchOptions()` | API函数名 |
 | 字典服务 | `useDictStore().getDict('code')` | 字典编码 |
 | Store | `useXxxStore().xxxList` | Store名+属性 |
@@ -99,3 +100,41 @@ formData.dept = { label: res.data.deptName, value: res.data.deptId }  // 合并
 ## 7. 路由模式
 
 `params`→URL路径中(`/user/123`) | `query`→URL查询串(`?id=123`) | `router.back()`→返回 | `router.replace()`→替换无历史。两者在新项目路由配置方式不同，需明确记录。
+
+## 8. 常量与枚举识别（关键）
+
+页面中 import 的常量/枚举是迁移时不可或缺的信息。**必须追踪到定义位置，将实际值完整内联到文档中**，不能只记录常量名。
+
+### 8.1 常见 import 模式
+
+```javascript
+// 从专用常量文件 import
+import { STATUS_MAP, TYPE_OPTIONS } from './constants'
+import { COLUMNS } from './columns'
+import { OrderStatus } from '@/enums/order'
+// 从 composable/config 文件 import
+import { FORM_RULES } from './config'
+import { PAGE_SIZE, MAX_UPLOAD } from '@/constants/common'
+// 解构 import 或默认 import
+import DICT_CODES from '@/constants/dict'
+```
+
+### 8.2 常量类型与提取要求
+
+| 常量类型 | 代码特征 | 提取要求 |
+|---------|---------|---------|
+| 状态/类型映射 | `{ 1: '启用', 2: '禁用' }` 或 `Map` | 列出所有 key→value 对 |
+| 选项列表 | `[{ label: '类型A', value: 1 }]` | 列出所有选项的 label+value |
+| 表格列定义 | `[{ title: '名称', dataIndex: 'name' }]` | 列出列标题+字段名+特殊渲染 |
+| 枚举 | `enum Status { DRAFT='draft' }` | 列出所有枚举成员名+值 |
+| 校验正则 | `const PHONE_REG = /^1[3-9]\d{9}$/` | 记录正则+用途说明 |
+| 配置常量 | `const PAGE_SIZE = 10` | 记录值+用途 |
+| 字典编码 | `const DICT_CODE = 'sys_status'` | 记录编码值+对应字典 |
+
+### 8.3 追踪规则
+
+1. 扫描 `<script>` 中所有 `import`，识别来自 `constants`、`enums`、`config`、`dict`、`columns` 等路径的导入
+2. 对每个常量 import：**读取源文件**，提取对应常量的完整定义
+3. 如果常量值是从另一处再次 import 的（二级引用），继续追踪直到找到实际值
+4. 将常量实际值内联到文档中使用该常量的位置（如选项来源列、状态映射、列定义等）
+5. 如果常量文件过大（>50个常量），只提取当前页面实际使用的常量
