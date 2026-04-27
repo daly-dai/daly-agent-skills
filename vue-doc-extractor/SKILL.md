@@ -64,7 +64,7 @@ description: "从 Vue 3 页面组件中提取框架无关的产品文档(Markdow
 
 运行 `scripts/detect-ui-lib.sh <项目根目录>` 检测项目使用的组件库。
 
-检测结果可能为：`antd` | `element` | `both` | `unknown`
+检测结果可能为：`antd` | `element` | `vant` | `both` | `unknown`
 
 #### 2.2 加载通用模式
 
@@ -76,8 +76,9 @@ description: "从 Vue 3 页面组件中提取框架无关的产品文档(Markdow
 根据检测结果加载：
 - 检测结果为 `antd` → 加载 `${CLAUDE_SKILL_DIR}/references/patterns-antd.md`
 - 检测结果为 `element` → 加载 `${CLAUDE_SKILL_DIR}/references/patterns-element.md`
-- 检测结果为 `both` → 两个都加载
-- 检测结果为 `unknown` → 两个都加载（保险策略）
+- 检测结果为 `vant` → 加载 `${CLAUDE_SKILL_DIR}/references/patterns-vant.md`
+- 检测结果为 `both` → 加载所有已识别的组件库模式文件
+- 检测结果为 `unknown` → 加载所有组件库模式文件（保险策略）
 
 #### 2.4 加载场景指南
 
@@ -95,7 +96,7 @@ description: "从 Vue 3 页面组件中提取框架无关的产品文档(Markdow
    - 对**本地 composable/hook** 文件：使用 Read 读取，提取其中的 API 调用和状态逻辑
    - 对**本地 API 模块**文件：使用 Read 读取，提取 API 函数签名和请求路径
    - 对**本地子组件**（弹窗/抽屉等）：如果用户提供了关联文件则读取分析，否则仅记录组件名和路径
-   - 对**第三方库**：支持识别 Ant Design Vue（a-* 前缀）和 Element Plus（el-* 前缀）组件，参考本文件中的通用 UI 术语映射表
+   - 对**第三方库**：支持识别 Ant Design Vue（a-* 前缀）、Element Plus（el-* 前缀）和 Vant（van-* 前缀）组件，参考本文件中的通用 UI 术语映射表
 
 3. **如果用户提供了关联文件**：逐一读取并纳入分析范围。
 
