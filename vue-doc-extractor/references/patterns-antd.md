@@ -1,64 +1,69 @@
-# Ant Design Vue 组件识别指南
+# Ant Design Vue 差异指南
 
-识别 Ant Design Vue (a-* 前缀) 组件的使用方式。配合 patterns-core.md 使用。
+识别 Ant Design Vue (a-* 前缀) 的特有模式。基础组件映射参见 `patterns-ui-mapping.md`。
 
-## 1. Ant Design Vue 组件识别
+## 1. 特有模式
 
-### 表单组件
+### 1.1 配置式表格
 
-| 组件 | 通用术语 | 关键属性 |
-|-----|---------|---------|
-| `a-form` / `a-form-item` | 表单容器/表单项 | `:model` `:rules` `label` `name` |
-| `a-input` | 文本输入框 | `v-model:value` `:maxlength` |
-| `a-input-number` | 数字输入框 | `:min` `:max` `:precision` |
-| `a-textarea` | 多行文本框 | `:rows` `:maxlength` |
-| `a-input-password` | 密码输入框 | |
-| `a-select` | 下拉选择 | `:options` `mode="multiple"` `@search` |
-| `a-tree-select` | 树形选择 | `:tree-data` `:field-names` |
-| `a-cascader` | 级联选择 | `:options` `:field-names` |
-| `a-date-picker` | 日期选择 | `format` `picker` |
-| `a-range-picker` | 日期范围选择 | `format` |
-| `a-radio-group` | 单选组 | `:options` |
-| `a-checkbox-group` | 多选组 | `:options` |
-| `a-switch` | 开关 | `v-model:checked` |
-| `a-upload` | 文件上传 | `v-model:file-list` `:action` |
+表格通过 `:columns` 配置数组定义列：
 
-### 表格组件
+```vue
+<a-table
+  :columns="columns"
+  :data-source="dataList"
+  :pagination="pagination"
+  :row-selection="rowSelection"
+>
+  <template #bodyCell="{ column, record, text }">
+    <span v-if="column.dataIndex === 'status'">
+      <a-tag :color="record.status === 1 ? 'green' : 'red'">{{ text }}</a-tag>
+    </span>
+  </template>
+</a-table>
+```
 
-| 组件/配置 | 关键属性 |
-|----------|---------|
-| `a-table` | `:columns` `:data-source` `:pagination` `:loading` `:row-selection` |
-| columns 项 | `title` `dataIndex` `width` `fixed` `sorter` `customRender` |
-| `#bodyCell` 插槽 | `{ column, record, text }` — 单元格自定义渲染 |
+**提取要点**：
+- `columns` 数组中每个对象的 `title`（表头）、`dataIndex`（字段名）必须记录
+- `#bodyCell` 插槽中通过 `column.dataIndex` 判断自定义渲染的列
+- `:row-selection` 配置对象中包含 `selectedRowKeys` 和 `onChange`
 
-### 布局与展示
+### 1.2 下拉选项 Prop 式传入
 
-| 组件 | 用途 |
-|-----|------|
-| `a-tabs`/`a-tab-pane` | 标签页，`v-model:activeKey` |
-| `a-card` | 卡片容器 |
-| `a-descriptions`/`-item` | 描述列表(详情展示) |
-| `a-steps`/`a-step` | 步骤条 |
-| `a-timeline`/`-item` | 时间线 |
-| `a-collapse`/`-panel` | 折叠面板 |
+`a-select`、`a-cascader`、`a-tree-select` 均通过 `:options` 直接传入选项数组：
 
-### 交互组件
+```vue
+<a-select :options="statusOptions" mode="multiple" />
+<!-- 选项格式：[{ label: '启用', value: 1 }, ...] -->
+```
 
-| 组件 | 用途 |
-|-----|------|
-| `a-modal` | 弹窗，`v-model:open` `:confirm-loading` |
-| `a-drawer` | 抽屉，`v-model:open` `width` |
-| `a-popconfirm` | 气泡确认，`@confirm` |
-| `a-button` | 按钮，`type` `@click` `:loading` `danger` |
-| `a-tag` / `a-badge` | 标签/徽标 |
-| `message.success/error` | 全局消息(函数调用) |
-| `Modal.confirm` | 确认对话框(函数调用) |
+### 1.3 弹窗显隐控制
 
-## 2. 下拉选项来源
+弹窗和抽屉使用 `v-model:open`（或 `:open` + `@update:open`）控制显隐：
 
-| 来源类型 | 代码模式 | 记录方式 |
-|---------|---------|---------|
-| 静态定义 | `[{label:'启用',value:1}]` | 列出所有选项 |
-| API 加载 | `onMounted→fetchOptions()` | API函数名 |
-| 字典服务 | `useDictStore().getDict('code')` | 字典编码 |
-| Store | `useXxxStore().xxxList` | Store名+属性 |
+```vue
+<a-modal v-model:open="visible" title="标题" :confirm-loading="submitting" @ok="handleOk">
+<a-drawer v-model:open="drawerVisible" title="详情" width="600">
+```
+
+### 1.4 表单字段绑定
+
+`a-form-item` 使用 `name` 属性绑定字段路径（支持嵌套如 `name="user.age"`）：
+
+```vue
+<a-form :model="formData" :rules="rules">
+  <a-form-item label="用户名" name="username">
+    <a-input v-model:value="formData.username" />
+  </a-form-item>
+</a-form>
+```
+
+### 1.5 消息提示函数调用
+
+```js
+import { message, Modal } from 'ant-design-vue'
+
+message.success('操作成功')
+message.error('操作失败')
+Modal.confirm({ title: '确认删除？', onOk: () => deleteItem() })
+```

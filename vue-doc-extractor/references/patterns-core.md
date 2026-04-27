@@ -1,6 +1,6 @@
 # Vue 3 通用代码模式识别指南
 
-分析 Vue SFC 源码时，用本指南识别关键代码结构。本文件包含与 UI 组件库无关的通用模式，组件库特定模式请参考 patterns-antd.md 或 patterns-element.md。
+分析 Vue SFC 源码时，用本指南识别关键代码结构。本文件包含与 UI 组件库无关的通用模式，组件库特定模式请参考 `patterns-ui-mapping.md` 及各 `patterns-${lib}.md`。
 
 ## 1. Vue 3 Composition API
 
@@ -85,6 +85,17 @@ formData.dept = { label: res.data.deptName, value: res.data.deptId }  // 合并
 
 记录：列表路径(`data.list`/`data.records`) + 总数路径(`data.total`) + 其他汇总字段
 
-## 6. 路由模式
+## 6. 下拉/选项来源（通用）
+
+| 来源类型 | 代码模式 | 记录方式 |
+|---------|---------|---------|
+| 静态定义 | `[{label:'启用',value:1}]` | 列出所有选项 |
+| API 加载 | `onMounted→fetchOptions()` | API函数名 |
+| 字典服务 | `useDictStore().getDict('code')` | 字典编码 |
+| Store | `useXxxStore().xxxList` | Store名+属性 |
+
+> Vant 的 `van-picker` 常用 `text`（而非 `label`）作为显示字段，识别时需注意。
+
+## 7. 路由模式
 
 `params`→URL路径中(`/user/123`) | `query`→URL查询串(`?id=123`) | `router.back()`→返回 | `router.replace()`→替换无历史。两者在新项目路由配置方式不同，需明确记录。

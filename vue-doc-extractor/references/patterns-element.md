@@ -1,90 +1,87 @@
-# Element Plus 组件识别指南
+# Element Plus 差异指南
 
-识别 Element Plus (el-* 前缀) 组件的使用方式。配合 patterns-core.md 使用。
+识别 Element Plus (el-* 前缀) 的特有模式。基础组件映射参见 `patterns-ui-mapping.md`。
 
-## 1. Element Plus 组件识别
+## 1. 特有模式
 
-### 表单组件
+### 1.1 模板式表格列
 
-| 组件 | 通用术语 | 关键属性 |
-|-----|---------|---------|
-| `el-form` / `el-form-item` | 表单容器/表单项 | `:model` `:rules` `label` `prop` |
-| `el-input` | 文本输入框 | `v-model` `:maxlength` `clearable` |
-| `el-input-number` | 数字输入框 | `:min` `:max` `:precision` `:step` |
-| `el-input type="textarea"` | 多行文本框 | `:rows` `:maxlength` `show-word-limit` |
-| `el-select` | 下拉选择 | `v-model` `multiple` `clearable` |
-| `el-option` | 下拉选项 | `label` `value` `disabled` |
-| `el-cascader` | 级联选择 | `:options` `:props` `clearable` |
-| `el-date-picker` | 日期选择 | `v-model` `type` `format` `value-format` |
-| `el-time-picker` | 时间选择 | `v-model` `format` `value-format` |
-| `el-radio-group` | 单选组 | `v-model` |
-| `el-radio` | 单选项 | `label` `disabled` |
-| `el-checkbox-group` | 多选组 | `v-model` |
-| `el-checkbox` | 多选项 | `label` `disabled` |
-| `el-switch` | 开关 | `v-model` `active-text` `inactive-text` |
-| `el-upload` | 文件上传 | `v-model:file-list` `:action` `:headers` `accept` |
-| `el-color-picker` | 颜色选择器 | `v-model` `show-alpha` |
-| `el-slider` | 滑块 | `v-model` `:min` `:max` `:step` `range` |
-| `el-transfer` | 穿梭框 | `v-model` `:data` `:titles` |
-| `el-autocomplete` | 自动补全 | `v-model` `:fetch-suggestions` `trigger-on-focus` |
+表格通过 `<el-table-column>` 模板嵌套定义列，插槽用 `#default="scope"`：
 
-### 表格组件
+```vue
+<el-table :data="tableData" @selection-change="handleSelectionChange">
+  <el-table-column type="selection" width="55" />
+  <el-table-column prop="name" label="姓名" width="180" sortable />
+  <el-table-column prop="status" label="状态">
+    <template #default="scope">
+      <el-tag :type="scope.row.status === 1 ? 'success' : 'danger'">
+        {{ scope.row.statusLabel }}
+      </el-tag>
+    </template>
+  </el-table-column>
+</el-table>
+```
 
-| 组件/配置 | 关键属性 |
-|----------|---------|
-| `el-table` | `:data` `stripe` `border` `highlight-current-row` `@selection-change` |
-| `el-table-column` | `prop` `label` `width` `fixed` `sortable` `type` |
-| `#default="scope"` 插槽 | `scope.row` / `scope.$index` — 单元格自定义渲染 |
+**提取要点**：
+- `el-table-column` 的 `prop` 对应字段名，`label` 对应表头，必须记录
+- 自定义渲染通过 `#default="scope"` 插槽实现，`scope.row` 获取行数据
+- 多选通过 `type="selection"` 列 + `@selection-change` 事件实现
 
-### 布局与展示
+### 1.2 嵌套式下拉选项
 
-| 组件 | 用途 |
-|-----|------|
-| `el-tabs`/`el-tab-pane` | 标签页，`v-model` 绑定当前标签名 |
-| `el-card` | 卡片容器，`header` 插槽定义标题 |
-| `el-descriptions`/`-item` | 描述列表，`title` 属性定义标题 |
-| `el-steps`/`el-step` | 步骤条，`active` 属性控制当前步骤 |
-| `el-timeline`/`-item` | 时间线，`timestamp` 属性定义时间 |
-| `el-collapse`/`-item` | 折叠面板，`v-model` 绑定展开项 |
+`el-select` 使用 `<el-option>` 嵌套循环：
 
-### 交互组件
+```vue
+<el-select v-model="form.status" multiple clearable>
+  <el-option
+    v-for="item in statusList"
+    :key="item.value"
+    :label="item.label"
+    :value="item.value"
+  />
+</el-select>
+```
 
-| 组件 | 用途 |
-|-----|------|
-| `el-dialog` | 弹窗，`v-model` 控制显隐，`title` 定义标题 |
-| `el-drawer` | 抽屉，`v-model` 控制显隐，`direction` 控制方向 |
-| `el-popconfirm` | 气泡确认，`title` `@confirm` `@cancel` |
-| `el-button` | 按钮，`type` `@click` `:loading` `plain` `round` |
-| `el-tag` | 标签，`type` `closable` `@close` |
-| `el-badge` | 徽标，`:value` `:max` `is-dot` |
-| `ElMessage` | 全局消息提示，`ElMessage.success/error/warning/info()` 函数调用 |
-| `ElMessageBox` | 消息弹框，`ElMessageBox.confirm/alert/prompt()` 函数调用 |
-| `ElNotification` | 通知提醒，`ElNotification.success/error/warning/info()` 函数调用 |
+### 1.3 弹窗显隐控制
 
-## 2. Element Plus 与 Ant Design Vue 关键差异
+弹窗和抽屉统一使用 `v-model` 控制显隐：
 
-识别 Element Plus 代码时，注意以下与 Ant Design Vue 的差异：
+```vue
+<el-dialog v-model="dialogVisible" title="标题" width="500px">
+<el-drawer v-model="drawerVisible" title="详情" direction="rtl" size="600px">
+```
 
-| 差异点 | Element Plus | Ant Design Vue |
-|-------|-------------|---------------|
-| 表格列定义 | `<el-table-column>` 模板式，插槽用 `#default="scope"` | `:columns` 配置式，插槽用 `#bodyCell` |
-| 下拉选项 | `<el-option>` 嵌套写法 | `:options` prop 直接传入 |
-| 表单校验 | `el-form-item` 用 `prop` 绑定字段 | `a-form-item` 用 `name` 绑定字段 |
-| 表格多选 | `@selection-change` + `type="selection"` 列 | `:row-selection` prop |
-| 弹框显隐 | `v-model` 控制 | `:open` / `v-model:open` 控制 |
-| 消息提示 | `ElMessage.success()` / `ElMessageBox.confirm()` | `message.success()` / `Modal.confirm()` |
+### 1.4 表单字段绑定
 
-## 3. Element Plus 下拉选项写法
+`el-form-item` 使用 `prop` 属性绑定字段路径（支持嵌套如 `prop="user.age"`）：
 
-- `el-select`：使用 `<el-option v-for>` 嵌套循环（与 Ant Design 的 `:options` prop 不同）
-- `el-cascader`：使用 `:options` prop + `:props` 配置字段映射
-- `el-autocomplete`：使用 `:fetch-suggestions` 回调，签名为 `(query, callback) => void`
+```vue
+<el-form :model="formData" :rules="rules">
+  <el-form-item label="用户名" prop="username">
+    <el-input v-model="formData.username" clearable />
+  </el-form-item>
+</el-form>
+```
 
-## 4. 下拉选项来源
+### 1.5 消息提示函数调用
 
-| 来源类型 | 代码模式 | 记录方式 |
-|---------|---------|---------|
-| 静态定义 | `[{label:'启用',value:1}]` | 列出所有选项 |
-| API 加载 | `onMounted→fetchOptions()` | API函数名 |
-| 字典服务 | `useDictStore().getDict('code')` | 字典编码 |
-| Store | `useXxxStore().xxxList` | Store名+属性 |
+```js
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+
+ElMessage.success('操作成功')
+ElMessageBox.confirm('确认删除？', '提示', { confirmButtonText: '确认', cancelButtonText: '取消' })
+ElNotification.info({ title: '通知', message: '有新的消息' })
+```
+
+### 1.6 自动补全回调
+
+`el-autocomplete` 使用 `:fetch-suggestions` 回调获取建议列表：
+
+```vue
+<el-autocomplete
+  v-model="keyword"
+  :fetch-suggestions="querySearch"
+  placeholder="请输入关键词"
+/>
+<!-- querySearch 签名为 (queryString, callback) => void -->
+```

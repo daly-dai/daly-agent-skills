@@ -64,21 +64,23 @@ description: "从 Vue 3 页面组件中提取框架无关的产品文档(Markdow
 
 运行 `scripts/detect-ui-lib.sh <项目根目录>` 检测项目使用的组件库。
 
-检测结果可能为：`antd` | `element` | `vant` | `both` | `unknown`
+检测结果为**空格分隔的库标识列表**，例如：`antd`、`element`、`vant`、`antd element`、`unknown`。
+
+> 新增组件库时，只需在 `scripts/detect-ui-lib.sh` 中添加对应的检测规则，无需修改本 SKILL.md。
 
 #### 2.2 加载通用模式
 
 始终加载：
 - `${CLAUDE_SKILL_DIR}/references/patterns-core.md` — Vue3 代码模式识别 + 数据流转追踪指南（框架无关）
+- `${CLAUDE_SKILL_DIR}/references/patterns-ui-mapping.md` — 通用 UI 术语映射表 + 组件识别速查表（框架无关）
 
 #### 2.3 按需加载组件库模式
 
-根据检测结果加载：
-- 检测结果为 `antd` → 加载 `${CLAUDE_SKILL_DIR}/references/patterns-antd.md`
-- 检测结果为 `element` → 加载 `${CLAUDE_SKILL_DIR}/references/patterns-element.md`
-- 检测结果为 `vant` → 加载 `${CLAUDE_SKILL_DIR}/references/patterns-vant.md`
-- 检测结果为 `both` → 加载所有已识别的组件库模式文件
-- 检测结果为 `unknown` → 加载所有组件库模式文件（保险策略）
+将检测结果按空格拆分为库标识列表，对每个标识加载对应的模式文件：
+- 对列表中的每个库标识 `${lib}`，加载 `${CLAUDE_SKILL_DIR}/references/patterns-${lib}.md`
+- 若检测结果为 `unknown`，则加载 `${CLAUDE_SKILL_DIR}/references/` 目录下所有 `patterns-*.md` 文件（保险策略）
+
+> 各 `patterns-${lib}.md` 只包含该组件库**特有的交互模式、与主流库的差异对比、常见代码片段**，组件基础识别信息已集中在 `patterns-ui-mapping.md` 中。
 
 #### 2.4 加载场景指南
 
@@ -96,7 +98,7 @@ description: "从 Vue 3 页面组件中提取框架无关的产品文档(Markdow
    - 对**本地 composable/hook** 文件：使用 Read 读取，提取其中的 API 调用和状态逻辑
    - 对**本地 API 模块**文件：使用 Read 读取，提取 API 函数签名和请求路径
    - 对**本地子组件**（弹窗/抽屉等）：如果用户提供了关联文件则读取分析，否则仅记录组件名和路径
-   - 对**第三方库**：支持识别 Ant Design Vue（a-* 前缀）、Element Plus（el-* 前缀）和 Vant（van-* 前缀）组件，参考本文件中的通用 UI 术语映射表
+   - 对**第三方库**：根据组件标签前缀识别对应组件库（如 `a-*` → Ant Design Vue、`el-*` → Element Plus、`van-*` → Vant 等），具体映射关系参考 `patterns-ui-mapping.md`
 
 3. **如果用户提供了关联文件**：逐一读取并纳入分析范围。
 
