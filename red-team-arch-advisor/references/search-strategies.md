@@ -62,8 +62,40 @@
 - `"[技术名称] 2.0" OR "next generation" OR "v2"`
 - `"[技术名称]" deprecation OR "end of life" OR sunset`
 
+## 策略六：学术与理论检索
+
+当讨论需要超越工程实践、触及基本原理时使用。工程博客讲"怎么做"，学术论文讲"为什么"。
+
+搜索模式：
+- `"[技术问题]" survey OR "state of the art" site:arxiv.org`
+- `"[架构模式]" formal verification OR "formal methods" site:arxiv.org`
+- `"[设计原则]" "cognitive load" OR "human factors" HCI`
+- `"[领域]" "fundamental limits" OR "impossibility" theory`
+- `"[架构决策]" "design rationale" OR "architectural trade-off" research`
+
+示例：
+
+用户讨论 AI Agent 的 context window 分配 →
+- 搜索：`"context window" allocation LLM agent survey 2025 site:arxiv.org`
+- 搜索：`"lost in the middle" attention mechanism long context`
+- 搜索：`"tool-augmented LLM" architecture cognitive science`
+
+用户讨论组件库的 API 设计 →
+- 搜索：`"API design" usability "developer experience" empirical study`
+- 搜索：`"design system" governance evolution research`
+
+用户讨论 Skill 编排的容错 →
+- 搜索：`"multi-agent" coordination fault tolerance survey site:arxiv.org`
+- 搜索：`"error recovery" pipeline orchestration patterns`
+
+**触发时机：**
+- 用户的问题涉及"为什么这样设计"而非"怎么做"
+- 工程博客找不到满意的解释
+- 阶段二需要从基本原理推导方案
+
 ## 何时检索
 
-- **阶段二（视野拓展）必须检索** — 至少 2 次搜索，找到真正相关的外部视角。
+- **阶段二（视野拓展）必须检索** — 至少 2 次搜索，找到真正相关的外部视角。先做第一性原理推导（不输出），再带着判断力去搜。
 - **阶段三（挑战）验证性检索** — 引用具体事件前先确认真实性。
+- **阶段二/三 涉及理论问题** — 工程博客说不清时，切到策略六搜学术来源。
 - **不确定时就搜** — 绝不编造公司名、年份或故障指标。搜不到就说"需要验证具体细节"。
