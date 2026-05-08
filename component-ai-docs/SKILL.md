@@ -165,14 +165,17 @@ node <skill-dir>/scripts/extract-types.mjs <文件1> <文件2> ... --project-roo
 **2c. 采集使用示例（1 轮）**
 
 ```
-node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <项目根目录> --output .ai/project-components/.cache/usages.json
+node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <项目根目录> --output-dir .ai/project-components/.cache/usages
 ```
 
 > Bash 参数: `timeout: 120000`。传入 BATCH 中所有组件的**名称**（不是文件路径）。
 
-脚本自动完成：全项目搜索 `import ComponentName` → 找到 `<ComponentName` 的 JSX 使用点 → 每个使用点提取 12 行上下文代码块。
+脚本按组件拆分输出，避免单个大 JSON 撑爆上下文：
+- `.cache/usages/CompA.json` — 每个组件一个文件，包含 `usages` 数组
+- stdout — 只输出摘要（组件名 → 使用次数）
+- stderr — 进度日志
 
-读取 stdout 的 JSON，每个组件得到 `usages` 数组。第三步中 AI 从这些原始素材中筛选 2-3 个典型示例，加上场景说明。
+第三步处理单个组件时，直接 `Read .cache/usages/<组件名>.json` 获取该组件的使用示例。
 
 ---
 
@@ -184,13 +187,13 @@ node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <
 
 **进入条件**: 第二步的 2a/2b/2c 全部完成（`.cache/` 下三个文件均存在）。
 
-**数据来源**：从缓存文件读取，不依赖 AI 上下文：
+**数据来源**：从缓存文件按需读取，不依赖 AI 上下文：
 
-| 数据 | 文件 | 读取时机 |
+| 数据 | 文件 | 读取方式 |
 |------|------|---------|
-| Props 类型 | `.cache/props.json` | 从数组中取当前组件的 `componentName` 匹配项 |
+| Props 类型 | `.cache/props.json` | Read 全文，从数组中取 `componentName` 匹配项 |
 | 关联类型 | `.cache/types.json` | 同上 |
-| 使用示例 | `.cache/usages.json` | 同上 |
+| 使用示例 | `.cache/usages/<组件名>.json` | Read 单个组件文件，直接获取 |
 
 **初始化计数器 `N = 0`。**
 

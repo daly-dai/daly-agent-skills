@@ -31,12 +31,14 @@ import { resolve, relative, join, dirname } from 'path';
 // ============================================================
 
 function parseArgs(argv) {
-  const opts = { componentNames: [], projectRoot: process.cwd(), outputPath: null };
+  const opts = { componentNames: [], projectRoot: process.cwd(), outputPath: null, outputDir: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--project-root' && argv[i + 1]) {
       opts.projectRoot = resolve(argv[++i]);
     } else if (argv[i] === '--output' && argv[i + 1]) {
       opts.outputPath = resolve(argv[++i]);
+    } else if (argv[i] === '--output-dir' && argv[i + 1]) {
+      opts.outputDir = resolve(argv[++i]);
     } else if (!argv[i].startsWith('--')) {
       opts.componentNames.push(argv[i]);
     }
@@ -98,9 +100,9 @@ function findInFile(filePath, componentName) {
     const before = content.slice(0, um.index);
     const lineNum = before.split('\n').length;
 
-    // 提取上下文 (~12 行，以使用行为中心)
-    const start = Math.max(0, lineNum - 8);
-    const end = Math.min(lines.length, lineNum + 5);
+    // 提取上下文 (±4 行，共计 ~9 行)
+    const start = Math.max(0, lineNum - 5);
+    const end = Math.min(lines.length, lineNum + 4);
     const codeBlock = lines.slice(start - 1, end).map((l, i) => {
       const ln = start + i;
       const marker = ln === lineNum ? '>' : ' ';
@@ -158,9 +160,8 @@ function main() {
       }
     }
 
-    // 如果只在 import 中用（如作为类型），仍记录
-    // 去重并限制数量（最多 8 个使用点，避免输出过大）
-    const uniqueUsages = allUsages.slice(0, 8);
+    // 限制数量，避免输出过大（每组件最多 5 个使用点）
+    const uniqueUsages = allUsages.slice(0, 5);
 
     results.push({
       componentName: compName,
@@ -169,19 +170,35 @@ function main() {
       usages: uniqueUsages,
     });
 
-    console.error(`  ${compName}: ${importFiles.length} import locations, ${allUsages.length} JSX usages`);
+    console.error(`  ${compName}: ${importFiles.length} imports, ${allUsages.length} JSX usages`);
   }
 
-  const json = JSON.stringify(results, null, 2);
-
+  // 写入总文件（如果指定）
   if (opts.outputPath) {
+    const json = JSON.stringify(results, null, 2);
     const outDir = dirname(opts.outputPath);
     if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
     writeFileSync(opts.outputPath, json, 'utf-8');
-    console.error(`Saved: ${opts.outputPath}`);
+    console.error(`Saved index: ${opts.outputPath}`);
   }
 
-  console.log(json);
+  // 按组件拆文件（如果指定）
+  if (opts.outputDir) {
+    if (!existsSync(opts.outputDir)) mkdirSync(opts.outputDir, { recursive: true });
+    for (const r of results) {
+      const f = join(opts.outputDir, `${r.componentName}.json`);
+      writeFileSync(f, JSON.stringify(r, null, 2), 'utf-8');
+    }
+    console.error(`Saved ${results.length} per-component files: ${opts.outputDir}`);
+  }
+
+  // stdout 只输出摘要，避免撑爆上下文
+  const summary = results.map(r => ({
+    componentName: r.componentName,
+    totalUsages: r.totalUsages,
+    importFileCount: r.importFiles.length,
+  }));
+  console.log(JSON.stringify(summary, null, 2));
 }
 
 main();
