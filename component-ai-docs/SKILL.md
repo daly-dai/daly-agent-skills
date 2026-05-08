@@ -219,11 +219,9 @@ prefer:      [搜项目中有无类似组件，没有就写"暂未发现替代�
 
 ---
 
-**3b. 计算 sourceHash**
+**3b. 获取 sourceHash**
 
-```
-node -e "const c=require('crypto'),f=require('fs');console.log(c.createHash('sha256').update(f.readFileSync(process.argv[1])).digest('hex'))" <组件文件路径>
-```
+从 `.cache/props.json` 中读取当前组件对应的 `sourceHash` 字段（extract-props.mjs 已计算）。
 
 ---
 

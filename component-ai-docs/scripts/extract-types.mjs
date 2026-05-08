@@ -109,7 +109,11 @@ function findTypeDefinition(typeName, allFiles) {
         else if (rest[i] === '}') {
           depth--;
           if (started && depth === 0) { endIdx = i + 1; break; }
-        } else if (!started && rest[i] === ';' && !isInterface) {
+        }
+        // 泛型尖括号也可能影响深度 (如 Record<string, {}>)
+        else if (rest[i] === '<') { if (started) depth++; }
+        else if (rest[i] === '>') { if (started) depth--; }
+        else if (!started && rest[i] === ';' && !isInterface) {
           // type alias without braces: type X = Y;
           endIdx = i + 1; break;
         }
@@ -182,31 +186,30 @@ function processComponent(filePath, allProjectFiles) {
     };
   }
 
-  // 从 Props block 中提取属性类型（支持跨行嵌套类型）
+  // 从 Props block 中提取属性类型（支持跨行嵌套类型和泛型）
   const lines = block.split('\n');
   const allTypeNames = new Set();
+  let depth = 0;
+  let currentProp = '';
 
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].trim().match(/^\w+\??:\s*(.+)$/);
-    if (m) {
-      let typeStr = m[1].replace(/;?\s*$/, '').trim();
-      // 跨行合并
-      let depth = 0;
-      for (const ch of typeStr) {
-        if (ch === '{' || ch === '[' || ch === '(') depth++;
-        if (ch === '}' || ch === ']' || ch === ')') depth--;
+    const trimmed = lines[i].trim();
+    if (!trimmed || trimmed === '{' || trimmed === '}') continue;
+
+    currentProp += (currentProp ? ' ' : '') + trimmed;
+
+    // 统计括号/尖括号深度
+    depth += (trimmed.match(/[{(<[]/g) || []).length;
+    depth -= (trimmed.match(/[}>)\]]/g) || []).length;
+
+    if (depth <= 0) {
+      const m = currentProp.match(/^(?:readonly\s+)?(\w+)(\??):\s*(.+?);?\s*$/);
+      if (m) {
+        const typeNames = extractTypeNames(m[3]);
+        for (const tn of typeNames) allTypeNames.add(tn);
       }
-      while (depth !== 0 && i + 1 < lines.length) {
-        i++;
-        const next = lines[i].trim().replace(/;?\s*$/, '');
-        typeStr += ' ' + next;
-        for (const ch of next) {
-          if (ch === '{' || ch === '[' || ch === '(') depth++;
-          if (ch === '}' || ch === ']' || ch === ')') depth--;
-        }
-      }
-      const typeNames = extractTypeNames(typeStr);
-      for (const tn of typeNames) allTypeNames.add(tn);
+      currentProp = '';
+      depth = 0;
     }
   }
 

@@ -19,6 +19,7 @@
 
 import { execSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { createHash } from 'crypto';
 import { resolve, join, basename, extname, dirname } from 'path';
 
 // ============================================================
@@ -151,19 +152,6 @@ function parseDocgenOutput(output) {
 }
 
 // ============================================================
-// 括号平衡检测 (用于跨行类型合并)
-// ============================================================
-
-function isBalanced(str) {
-  let depth = 0;
-  for (const ch of str) {
-    if (ch === '{' || ch === '[' || ch === '(') depth++;
-    if (ch === '}' || ch === ']' || ch === ')') depth--;
-  }
-  return depth === 0;
-}
-
-// ============================================================
 // 策略 4: 手工解析 TypeScript 源码 (最后兜底)
 // ============================================================
 
@@ -196,33 +184,50 @@ function manualExtractProps(source) {
     return { props, warnings };
   }
 
+  // 逐行解析，累积跨行属性 (参考 gen-llms-txt.ts parsePropsBlock)
   const lines = block.split('\n');
   let pendingComment = '';
+  let depth = 0;
+  let currentProp = '';
 
   for (let i = 0; i < lines.length; i++) {
-    const tl = lines[i].trim();
+    const trimmed = lines[i].trim();
 
-    if (tl.startsWith('/**') || tl.startsWith('*')) {
-      pendingComment += tl.replace(/^\/?\*+\s*\/?/, '').replace(/^\*\s*/, '').trim() + ' ';
-      if (tl.endsWith('*/')) pendingComment = pendingComment.replace(/\s*\*\/\s*$/, '').trim();
+    // 跳过空行和块注释开始/结束标记
+    if (!trimmed || trimmed === '{' || trimmed === '}') continue;
+
+    // 累积 JSDoc / 单行注释
+    if (trimmed.startsWith('/**') || trimmed.startsWith('*')) {
+      pendingComment += trimmed.replace(/^\/?\*+\s*\/?/, '').replace(/^\*\s*/, '').trim() + ' ';
+      if (trimmed.endsWith('*/')) pendingComment = pendingComment.replace(/\s*\*\/\s*$/, '').trim();
       continue;
     }
-    if (tl.startsWith('//')) { pendingComment = tl.replace(/^\/\/\s*/, '').trim(); continue; }
+    if (trimmed.startsWith('//')) { pendingComment = trimmed.replace(/^\/\/\s*/, '').trim(); continue; }
 
-    const m = tl.match(/^(\w+)(\?)?:\s*(.+)$/);
-    if (m) {
-      let typeStr = m[3].replace(/;?\s*$/, '').trim();
-      // 跨行合并嵌套类型 (如 { title: string }[] )
-      while (!isBalanced(typeStr) && i + 1 < lines.length) {
-        i++;
-        typeStr += ' ' + lines[i].trim().replace(/;?\s*$/, '');
+    // 累积当前行到 currentProp
+    currentProp += (currentProp ? ' ' : '') + trimmed;
+
+    // 统计括号深度 (包括尖括号，用于泛型)
+    depth += (trimmed.match(/[{(<[]/g) || []).length;
+    depth -= (trimmed.match(/[}>)\]]/g) || []).length;
+
+    // 括号匹配完成后，尝试提取属性
+    if (depth <= 0) {
+      const propMatch = currentProp.match(
+        /^(?:readonly\s+)?(\w+)(\??):\s*(.+?);?\s*$/
+      );
+      if (propMatch && !propMatch[1].startsWith('[')) {
+        props.push({
+          name: propMatch[1],
+          type: propMatch[3].replace(/;?\s*$/, '').trim(),
+          required: !propMatch[2],
+          defaultValue: null,
+          description: pendingComment || '',
+        });
       }
-      typeStr = typeStr.replace(/;?\s*$/, '').trim();
-      props.push({
-        name: m[1], type: typeStr,
-        required: !m[2], defaultValue: null, description: pendingComment || '',
-      });
       pendingComment = '';
+      currentProp = '';
+      depth = 0;
     }
   }
 
@@ -259,11 +264,13 @@ function processOne(filePath, projectRoot) {
       success: false,
       method: 'error',
       props: [],
+      sourceHash: null,
       warnings: [`Cannot read file: ${filePath}`],
     };
   }
 
   const componentName = extractComponentName(source, filePath);
+  const sourceHash = createHash('sha256').update(source).digest('hex');
 
   // 使用缓存的策略（main 中已探测过）
   if (cachedStrategy) {
@@ -275,6 +282,7 @@ function processOne(filePath, projectRoot) {
           componentName, file: filePath,
           success: true, method: cachedStrategy.method,
           props: parsed.props, warnings: parsed.warnings,
+          sourceHash,
         };
       }
     } catch {
@@ -286,8 +294,9 @@ function processOne(filePath, projectRoot) {
   const manual = manualExtractProps(source);
   return {
     componentName, file: filePath,
-    success: cachedStrategy ? false : false, method: 'manual-extraction',
+    success: false, method: 'manual-extraction',
     props: manual.props, warnings: manual.warnings,
+    sourceHash,
   };
 }
 
