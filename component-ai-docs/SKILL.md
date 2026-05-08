@@ -9,9 +9,7 @@ description: "盘活项目中的存量业务组件，让 AI 认识它们。自�
 
 **核心问题**: AI 写前端代码时，不知道项目里有哪些业务组件、接受什么 Props、什么时候该用什么时候不该用。
 
-**解决思路**: 通过深度搜集组件源码、关联类型、真实使用案例，生成 AI 可消费的标准文档。高频组件优先，分批推进。
-
----
+**解决思路**: 通过脚本扫描 + 深度搜集 + 真实使用案例，生成 AI 可消费的标准文档。高频组件优先，分批推进。
 
 ## 核心原则
 
@@ -20,221 +18,270 @@ description: "盘活项目中的存量业务组件，让 AI 认识它们。自�
 3. **先盘核心，再补全量。** 20 个组件里高频使用的可能就 5 个，优先盘活这几个。
 4. **真实案例胜过编造示例。** 项目里已有大量使用案例，搜集它们比 AI 编造示例更有价值。
 
----
+## 参考文档
 
-## 输出格式标准
+> 以下规范文件在相关步骤中会被引用，按需读取。
 
-> 这是本 Skill 的"输出锁"——最终产出的文档必须符合以下格式。
+| 文件 | 内容 | 何时读 |
+|------|------|--------|
+| `references/output-format.md` | 目录结构、.md 模板、metadata.json 规范 | 第三步生成文件时 |
+| `references/jsdoc-guidelines.md` | JSDoc 写法规范 | 第三步写 Props 注释时 |
 
-### 目录结构
+## 执行流程（状态机）
 
-```
-.ai/project-components/
-├── README.md                    # 索引层：组件速查表（用途 + 边界 + 一句话描述）
-└── components/
-    ├── UserTable.md             # 详情层：完整 Props + 使用案例
-    ├── StatusBadge.md
-    └── ...
-```
-
-### README.md 索引层（给 AI 第一步看）
-
-AI 先读这个，快速判断"有没有我能用的组件"，再按需读取具体组件的详情文件。不一次性全读。
-
-### components/{Name}.md 详情层（给 AI 要用时看）
-
-每个文件应包含：
-
-1. **使用边界**（最优先）：何时适用、何时不适用、优先替代
-2. **子组件/静态方法**：如 `SForm.useWatch`、`SButton.Group`
-3. **类型定义**：Props 接口 + 关联类型，含 JSDoc 描述
-4. **有效接口**（使用统计）：基于项目内全部使用点统计的 Props 使用率 + 冗余标记 + any 反推
-5. **组合组件引用**：本组件 Props 里引用了哪些外部类型，内联它们的核心属性
-6. **实际使用示例**（从项目真实代码中提取）：2-3 个覆盖不同场景的使用案例，附简要说明
-
-### metadata.json 字段标准
-
-由 Skill 辅助生成，人工确认：
-
-```json
-{
-  "useWhen": [
-    "管理后台标准列表页（搜索 + 表格 + 分页）"
-  ],
-  "dontUseWhen": [
-    "纯展示表格，无搜索条件，直接用 STable"
-  ],
-  "prefer": {
-    "STable + SForm.Search + useSearchTable": "需要更精细控制时"
-  },
-  "sourceHash": "a1b2c3d4e5f6..."
-}
-```
-
-| 字段 | 意义 | 写作要求 |
-|------|------|---------|
-| `useWhen` | 这个组件**应该**用的场景 | 用业务语言描述，不要写技术实现。好："需要搜索+表格+分页联动的列表页"。差："当需要 SSearchTable 时"。 |
-| `dontUseWhen` | 看起来像但**不应该**用这个组件的场景 | 每条必须给出替代方案（"直接用 XXX"）。这是 AI 最需要的信息。 |
-| `prefer` | 在这个场景下**优先用别的** | key=更优方案，value=什么时候用那个方案 |
-| `sourceHash` | 组件入口文件的 SHA256 hash | 用于后续文档保鲜检测（`--check` 模式对比当前源码 hash） |
+> **规则：每步执行完后，根据末尾的 `→` 指令跳转。遇到 `IF...THEN...ELSE...` 时只走一条分支。不自行判断流程。**
 
 ---
 
-## 执行流程
+### 第一步：获取组件清单
 
-### 第一步：扫描并保存组件全量清单
+**进入条件**: Skill 被触发，且非"检查组件文档是否过时"意图。
 
-**1a. 检查是否已有清单**
+**1a. 检查清单是否存在**
 
-先检查 `.ai/project-components/.component-list.json` 是否存在。
+检查 `.ai/project-components/.component-list.json`。
 
-**如果存在** → 读取清单，显示进度，让用户选择本次处理哪个优先级：
+**IF 不存在 → 执行 1b（首次扫描）。**
+
+**IF 存在 → 执行 1c（展示进度）。**
+
+---
+
+**1b. 首次扫描（运行脚本）**
 
 ```
-组件清单已存在（2024-01-15 创建）：
+node <skill-dir>/scripts/scan-components.mjs <项目根目录>
+```
+
+脚本参数：
+
+| 参数 | 用途 |
+|------|------|
+| `<项目根目录>` | 位置参数，默认当前目录 |
+| `--dir <path>` | 只扫描指定子目录 |
+| `--patterns <p1,p2>` | 自定义 glob 模式 |
+| `--output <path>` | 自定义输出路径 |
+
+**脚本输出 "No component files matched any pattern"** → 告知用户，询问 `--dir` 路径后重新执行，然后回到本步开头。
+
+**脚本输出 "WARNING: More than 30 components"** → 告知用户建议缩小范围，询问是否继续。用户说继续 → 沿用结果；用户指定新范围 → 加 `--dir` 重新执行。
+
+**脚本成功** → 自动进入 1c。
+
+---
+
+**1c. 展示进度**
+
+读取 `.component-list.json`。状态符号：`✅`=done, `⬜`=pending, `⏭️`=skipped, `🚫`=deprecated。
+
+```
+组件清单（2024-01-15 创建）：
 
 === 高优先级（5 个）===
   ✅ UserTable        — 已完成
   ⬜ SearchForm       — 未处理
   ⬜ DataTable        — 未处理
-  ...
+  🚫 OldModal         — 已废弃
 
-=== 中优先级（8 个，全部未处理）===
+=== 中优先级（8 个）===
   ⬜ StatusBadge
-  ...
+  ⏭️ TagList          — 已跳过
 
-=== 低优先级（7 个，全部未处理）===
+=== 低优先级（7 个）===
   ⬜ OldReport
   ...
 
-已完成 1/20。请选择本次处理的优先级：高 / 中 / 低？
+已完成 1/20，已跳过 1，已废弃 1。
 ```
 
-> 用户选择一个优先级后，跳到第二步。如果所有组件已完成，提示"全部完成"。
+询问用户：**请选择本次处理的优先级：高 / 中 / 低？**
 
-**如果不存在** → 执行 1b 首次扫描。
+**IF 某个优先级内所有组件 `status` 都不是 `pending`** → 该优先级显示"全部已完成"，不可选。
 
-**1b. 首次扫描**
+**IF 所有 `pending` 组件已全部处理完** → 提示"全部完成"，流程结束。
 
-Glob 扫描多目录（根据项目结构选用）：
-```
-src/components/**/*.tsx
-src/pages/**/components/**/*.tsx
-src/business/**/*.tsx
-src/widgets/**/*.tsx
-src/modules/**/components/**/*.tsx
-```
+> 用户选择后 → 进入第二步。
 
-列出发现的目录及组件数量，向用户确认范围。
+---
 
-确认后，搜索每个组件的引用次数（搜 `import ... from '...<ComponentName>'`），按优先级分组并**保存到 `.component-list.json`**：
+### 第二步：批量搜集数据（3 轮脚本）
 
-```json
-{
-  "createdAt": "2024-01-15",
-  "high": [
-    {"name": "UserTable", "file": "src/components/UserTable.tsx", "refs": 12, "done": false}
-  ],
-  "medium": [
-    {"name": "StatusBadge", "file": "src/components/StatusBadge.tsx", "refs": 6, "done": false}
-  ],
-  "low": [
-    {"name": "OldReport", "file": "src/components/OldReport.tsx", "refs": 0, "done": false}
-  ]
-}
-```
+**进入条件**: 用户已选择优先级（高/中/低）。
 
-优先级判定：Props > 10 或有子组件或 > 8 处引用 → high；3-8 处引用 → medium；< 3 处 → low。
+从 `.component-list.json` 中取出该优先级下 `status === "pending"` 的组件列表，记为 `BATCH`。
 
-输出清单并询问：
+> 如果 `BATCH` 为空，回到第一步 1c 重新选择。
+
+**以下 3 个脚本按顺序执行，每个脚本一次 Bash 调用完成。**
+
+---
+
+**2a. 批量提取 Props（1 轮）**
 
 ```
-共 20 个组件：高优 5 个，中优 8 个，低优 7 个。清单已保存。
-建议先处理高优。本次处理哪个优先级？（高 / 中 / 低）
+node <skill-dir>/scripts/extract-props.mjs <文件1> <文件2> ... --project-root <项目根目录>
 ```
 
-> 如果总数 > 30，建议缩小目录范围再扫描。
+> 传入 BATCH 中所有组件的文件路径，一次调完。
 
-### 第二步：批量搜集选定优先级的组件
+进度输出在 stderr，JSON 结果在 stdout。每个组件独立 try/catch，一个报错不影响其他。
 
-从 `.component-list.json` 中读取选中优先级中 `done: false` 的组件，一次性批量搜集：
+读取 stdout 的 JSON 数组，按以下规则标记：
 
-**2a. 批量提取 Props**
+| 条件 | 标记 |
+|------|------|
+| `success: true` + `method !== "manual-extraction"` | 类型可信，直接用 |
+| `success: false` 或 `method === "manual-extraction"` | 所有 prop 标 `[? 手工提取，类型待确认]` |
+| 单个 prop 的 `type === "any"` 或 `"unknown"` | 标 `[? 类型不明确]` |
 
-对该批次所有组件文件，循环执行：
+---
+
+**2b. 搜索关联类型（1 轮）**
+
 ```
-npx react-docgen --resolver ts <文件路径>
-# 如果 npx 失败：./node_modules/.bin/react-docgen --resolver ts <文件路径>
-# 两条都失败 → 手工读源码提取
-```
-
-检查每个组件的输出：
-- 有具体类型名 → ✅ 直接用
-- 全是 `any`/`unknown` → ⚠️ 保留结构，标 `[?]`
-- 失败 → 手工提取，全部标 `[?]`
-
-同时记录每个组件的子组件。
-
-**2b. 批量搜索关联类型**
-
-用 Grep 一次性搜索该批次组件名：
-```
-grep -r "(ComponentA|ComponentB)" src/types/ src/api/
+node <skill-dir>/scripts/extract-types.mjs <文件1> <文件2> ... --project-root <项目根目录>
 ```
 
-**2c. 批量搜索使用案例**
+> 同样传入 BATCH 中所有组件的文件路径，一次调完。
 
-用 Grep 一次性搜索该批次所有组件的调用位置：
+脚本自动完成：读取每个组件的 Props → 提取类型中的 PascalCase 标识符 → 全项目搜索 `interface X` / `type X` 定义 → 输出定义块。
+
+读取 stdout 的 JSON，每个组件得到 `referencedTypes` 数组，供第三步填入"组合组件引用"。
+
+---
+
+**2c. 采集使用示例（1 轮）**
+
 ```
-grep -r "<\(ComponentA\|ComponentB\)" src/pages/ src/views/
-grep -r "import.*\(ComponentA\|ComponentB\)" src/
+node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <项目根目录>
 ```
 
-将搜索结果按组件名分拣。每个组件取 2-3 个不同场景的案例，超过 10 处的取 3-5 个。
+> 传入 BATCH 中所有组件的名称，一次调完。
 
-### 第三步：逐组件处理并立即保存（不中断，一口气跑完）
+脚本自动完成：全项目搜索 `import ComponentName` → 找到 `<ComponentName` 的 JSX 使用点 → 每个使用点提取 12 行上下文代码块。
 
-> **不间断执行——选定优先级后，对其中所有未处理组件依次跑完，中间不暂停询问。**
+读取 stdout 的 JSON，每个组件得到 `usages` 数组。第三步中 AI 从这些原始素材中筛选 2-3 个典型示例，加上场景说明。
 
-对该批次中每个组件，依次执行：
+---
 
-**3a. 统计有效接口** — 基于第二步的搜索结果，统计每个 Props：使用率、实际传值；0 次 → `[❗疑似冗余]`；`any` 但使用点一致 → `[✅ 实际类型: X]`
+> 三个脚本全部执行完毕 → 进入第三步。
 
-**3b. 推导 metadata** — 按模板填空（`useWhen`/`dontUseWhen`/`prefer`），所有项标 `[? 待确认]`
+---
 
-**3c. 计算 sourceHash** — `sha256sum <组件文件路径>`
+### 第三步：逐组件生成文档，每 5 个暂停
 
-**3d. 立即保存** — 生成 `components/<组件名>.md` 和 `metadata.json`，不停留，不等待确认。
+**进入条件**: 第二步的 2a/2b/2c 全部完成。
 
-处理完一个组件后立刻开始下一个，直到该优先级全部处理完。
+**初始化计数器 `N = 0`。**
 
-### 第四步：汇报结果
+对 `BATCH` 中每个组件，依次执行 3a → 3b → 3c → 3d。每处理完一个组件 `N += 1`。
 
-全部组件处理完后：
+**IF `N < 5` 且 BATCH 中还有剩余组件 → 继续处理下一个。**
 
-1. 更新 `.component-list.json`（标记 `"done": true`）
-2. 更新 `README.md` 索引
+**IF `N === 5` 或 BATCH 处理完毕 → 暂停，汇报本批摘要（见下方模板），等待用户确认。**
+
+---
+
+**3a. 统计有效接口**
+
+基于第二步的使用案例，对每个 prop 做统计：
+
+| 情况 | 标记 |
+|------|------|
+| 所有使用点都传了该 prop | 不标记 |
+| 所有使用点都没传该 prop | `[❗疑似冗余]` |
+| prop 是 `any`，但使用点值类型一致 | `[✅ 实际类型: X]` |
+| prop 是 `any`，使用点值类型不一致 | `[? 类型不明确]` |
+
+---
+
+**3b. 推导 metadata**
+
+按以下模板逐项填空，不知道就写固定话术，不要编造：
+
+```
+useWhen:     [看组件源码核心逻辑，用一句业务语言描述]
+dontUseWhen: [看源码条件分支——什么情况不渲染/返回 null？没有就写"暂未发现排除场景"]
+prefer:      [搜项目中有无类似组件，没有就写"暂未发现替代方案"]
+```
+
+每项前面标 `[? 待确认]`。
+
+---
+
+**3c. 计算 sourceHash**
+
+```
+node -e "const c=require('crypto'),f=require('fs');console.log(c.createHash('sha256').update(f.readFileSync(process.argv[1])).digest('hex'))" <组件文件路径>
+```
+
+---
+
+**3d. 保存文件**
+
+按 `references/output-format.md` 中的模板生成并写入：
+
+- `.ai/project-components/components/<组件名>.md`
+- `.ai/project-components/components/<组件名>.metadata.json`
+
+保存后不等待，`N += 1`，立即处理下一个。
+
+---
+
+**暂停汇报模板（`N === 5` 或 BATCH 完成时使用）：**
+
+```
+完成第 X-Y 个组件，metadata 摘要：
+
+1. UserTable    useWhen: "管理后台列表页（搜索+表格+分页）" [? 待确认]
+                dontUseWhen: "纯展示无搜索 → 直接用 STable" [? 待确认]
+2. StatusBadge  useWhen: "需要按状态显示不同颜色标签的场景" [? 待确认]
+                dontUseWhen: "暂未发现排除场景" [? 待确认]
+...
+
+以上需要修改吗？输入序号+修改内容，或输入"继续"。
+```
+
+**收到"继续" → 重置 `N = 0`：**
+
+- `IF BATCH 中还有剩余组件 → 继续处理下一个。`
+- `IF BATCH 全部完成 → 进入第四步。`
+
+**收到修改意见 → 先修改对应文件，然后 `N -= 1`（本次暂停的批次仍算已处理），询问"继续？"**
+
+---
+
+### 第四步：收尾
+
+**进入条件**: BATCH 中所有组件已处理完毕且用户确认。
+
+1. 更新 `.component-list.json`：将本批次已处理组件的 `status` 改为 `"done"`
+2. 更新 `.ai/project-components/README.md` 索引
 3. 输出汇总：
 
 ```
-✅ 本批次完成 X 个组件：UserTable, SearchForm, ...
-⚠️  以下 metadata 项需关注（标了 [?]）：
+本批次完成 X 个组件：UserTable, SearchForm, ...
+
+标了 [?] 的 metadata 项（建议人工复核）：
   - UserTable: dontUseWhen — "空数据时是否用 Empty 替代？"
   - SearchForm: useWhen — 推测为"搜索场景"，请确认
+
 总进度：M / N（高优 M1/N1, 中优 M2/N2, 低优 M3/N3）
-下次新建任务，执行本 skill 即可继续处理剩余组件。
 ```
 
-> 不逐组件追问。`[?]` 项汇总列出，用户可随时修正。
+**→ 流程结束。** 下次新建任务触发本 skill，从第一步 1a 继续处理剩余组件。
 
 ---
 
 ## 文档保鲜：检测过时文档
 
-当用户说"检查组件文档是否过时"或"更新组件文档"时，执行以下检测：
+> **独立流程。** 仅当用户说"检查组件文档是否过时"或"更新组件文档"时执行，跳过了上述四步流程。
 
-1. 读取 `.ai/project-components/` 下所有 metadata.json，提取每个组件的 `sourceHash` 和源文件路径
-2. 对每个组件的源文件执行 `sha256sum <源文件路径>`，与记录的 hash 对比
+1. 读取 `.ai/project-components/` 下所有 metadata.json，提取 `sourceHash` 和源文件路径
+2. 对每个源文件执行 hash 比对：
+   ```
+   node -e "const c=require('crypto'),f=require('fs');console.log(c.createHash('sha256').update(f.readFileSync(process.argv[1])).digest('hex'))" <源文件路径>
+   ```
 3. 输出差异清单：
 
 ```
@@ -242,80 +289,30 @@ grep -r "import.*\(ComponentA\|ComponentB\)" src/
   ✅ UserTable     — 文档与源码一致
   ❌ StatusBadge   — 源码已变更（旧 hash: a1b2..., 新 hash: e5f6...），文档可能过时
   ✅ DataChart     — 文档与源码一致
-  ✅ OldReport     — 未变更
 
 共 N 个组件：X 个一致，Y 个可能过时。建议对过时组件重新执行第二步和第三步。
 ```
 
-> 此检测只读不写，不修改任何源码或文档，零风险。
-
----
-
-## JSDoc 写法规范（给 AI 看的）
-
-> 目标：让 AI 看到 JSDoc 就知道字段怎么用。
-
-### Props 顶层 JSDoc
-
-```
-/**
- * SSearchTable 搜索表格组件 Props
- *
- * 集成 SForm.Search + STable 的一体化组件，是管理后台列表页的首选方案。
- * 自动处理搜索、分页、数据加载的联动逻辑。
- *
- * @example
- * <SSearchTable
- *   requestFn={async (params) => ({ dataList, totalSize })}
- *   formProps={{ items: [...], columns: 3 }}
- *   tableProps={{ columns: [...], rowKey: 'id' }}
- * />
- */
-```
-
-要点：一句话定位 + 核心能力 + 最小可运行示例。
-
-### 属性级 JSDoc
-
-```
-好：
-  /** 数据请求函数。接收搜索参数+分页参数，返回 { dataList, totalSize } */
-  requestFn: (data?: any) => Promise<any>;
-
-  /** 搜索表单列数，默认 3 */
-  columns?: number;
-
-  /** 表格区域标题。不传则无标题栏 */
-  tableTitle?: STitleProps;
-
-差：
-  /** 请求函数 */
-  requestFn: Function;
-
-  /** columns */
-  columns?: number;
-```
-
-规则：
-- 说清楚"什么时候需要设这个字段"和"不设会怎样"
-- 引用其他类型时说明"来自哪个组件/接口"
-- 默认值必须写明
-- 必填字段可以简短，但必须说清楚用途
+> 此检测只读不写，零风险。
 
 ---
 
 ## 验证清单
 
-- [ ] 第一步已向用户确认组件目录范围
-- [ ] 第二步对该批次组件做了批量搜索（非逐个重复搜）
-- [ ] 每个组件都尝试了 react-docgen 提取 Props（不可用时已回退）
-- [ ] 第三步逐组件处理，每个组件处理完立即保存（不攒到最后）
-- [ ] 每个组件都有 metadata.json（useWhen / dontUseWhen / prefer / sourceHash 至少前三项有内容）
-- [ ] metadata.json 包含 sourceHash
-- [ ] Props 接口有顶层 JSDoc
-- [ ] 每个属性有注释（无注释的标 `[?]` 并告知用户）
+- [ ] 第一步已执行 `scan-components.mjs`，脚本成功输出 `.component-list.json`
+- [ ] 脚本输出 "No component files matched" 时，已询问用户指定 `--dir`
+- [ ] 脚本输出 "More than 30 components" 时，已建议缩小范围
+- [ ] 第二步 2a 已批量执行 `extract-props.mjs`（一次 Bash），检查了每个组件的 `success` 和 `method`
+- [ ] 第二步 2b 已批量执行 `extract-types.mjs`（一次 Bash）
+- [ ] 第二步 2c 已批量执行 `collect-usages.mjs`（一次 Bash）
+- [ ] `method: "manual-extraction"` 的 props 已全部标 `[? 手工提取，类型待确认]`
+- [ ] 第三步逐组件处理，处理完立即保存
+- [ ] `N === 5` 或批次完成时已暂停汇报，等待用户确认
+- [ ] 每个组件都有 metadata.json（useWhen / dontUseWhen / prefer / sourceHash）
+- [ ] `.component-list.json` 中已完成组件的 status 已更新为 `"done"`
 - [ ] README.md 索引覆盖所有已处理组件
-- [ ] 每个 .md 格式一致（使用边界 → 子组件 → 类型 → 有效接口 → 组合引用 → 使用示例）
-- [ ] 有效接口表基于全部使用点统计，含使用率 + 冗余标记 + any 反推
-- [ ] dontUseWhen 每条都给出了替代方案
-- [ ] 每个组件至少有 2 个来自真实代码的使用示例，标注了来源路径
+- [ ] 每个 .md 格式严格按 `references/output-format.md` 模板
+- [ ] 有效接口表含使用率 + 冗余标记 + any 反推
+- [ ] dontUseWhen 每条给出了替代方案
+- [ ] 每个组件至少 2 个来自真实代码的使用示例，标注了来源路径（从 `collect-usages.mjs` 输出的素材中筛选）
+- [ ] Props 注释符合 `references/jsdoc-guidelines.md` 规范
