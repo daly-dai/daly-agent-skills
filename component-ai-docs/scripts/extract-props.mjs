@@ -151,6 +151,19 @@ function parseDocgenOutput(output) {
 }
 
 // ============================================================
+// 括号平衡检测 (用于跨行类型合并)
+// ============================================================
+
+function isBalanced(str) {
+  let depth = 0;
+  for (const ch of str) {
+    if (ch === '{' || ch === '[' || ch === '(') depth++;
+    if (ch === '}' || ch === ']' || ch === ')') depth--;
+  }
+  return depth === 0;
+}
+
+// ============================================================
 // 策略 4: 手工解析 TypeScript 源码 (最后兜底)
 // ============================================================
 
@@ -186,8 +199,8 @@ function manualExtractProps(source) {
   const lines = block.split('\n');
   let pendingComment = '';
 
-  for (const line of lines) {
-    const tl = line.trim();
+  for (let i = 0; i < lines.length; i++) {
+    const tl = lines[i].trim();
 
     if (tl.startsWith('/**') || tl.startsWith('*')) {
       pendingComment += tl.replace(/^\/?\*+\s*\/?/, '').replace(/^\*\s*/, '').trim() + ' ';
@@ -196,10 +209,17 @@ function manualExtractProps(source) {
     }
     if (tl.startsWith('//')) { pendingComment = tl.replace(/^\/\/\s*/, '').trim(); continue; }
 
-    const m = tl.match(/^(\w+)(\?)?:\s*(.+?);?\s*$/);
+    const m = tl.match(/^(\w+)(\?)?:\s*(.+)$/);
     if (m) {
+      let typeStr = m[3].replace(/;?\s*$/, '').trim();
+      // 跨行合并嵌套类型 (如 { title: string }[] )
+      while (!isBalanced(typeStr) && i + 1 < lines.length) {
+        i++;
+        typeStr += ' ' + lines[i].trim().replace(/;?\s*$/, '');
+      }
+      typeStr = typeStr.replace(/;?\s*$/, '').trim();
       props.push({
-        name: m[1], type: m[3].replace(/;$/, '').trim(),
+        name: m[1], type: typeStr,
         required: !m[2], defaultValue: null, description: pendingComment || '',
       });
       pendingComment = '';

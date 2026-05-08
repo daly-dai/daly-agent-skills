@@ -197,7 +197,7 @@ node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <
 
 **初始化计数器 `N = 0`。**
 
-对 `BATCH` 中每个组件，依次执行 3a → 3b → 3c → 3d。每处理完一个组件 `N += 1`。
+对 `BATCH` 中每个组件，依次执行 3a → 3b → 3c。每处理完一个组件 `N += 1`。
 
 **IF `N < 10` 且 BATCH 中还有剩余组件 → 继续处理下一个。**
 
@@ -205,20 +205,7 @@ node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <
 
 ---
 
-**3a. 统计有效接口**
-
-基于第二步的使用案例，对每个 prop 做统计：
-
-| 情况 | 标记 |
-|------|------|
-| 所有使用点都传了该 prop | 不标记 |
-| 所有使用点都没传该 prop | `[❗疑似冗余]` |
-| prop 是 `any`，但使用点值类型一致 | `[✅ 实际类型: X]` |
-| prop 是 `any`，使用点值类型不一致 | `[? 类型不明确]` |
-
----
-
-**3b. 推导 metadata**
+**3a. 推导 metadata**
 
 按以下模板逐项填空，不知道就写固定话术，不要编造：
 
@@ -232,7 +219,7 @@ prefer:      [搜项目中有无类似组件，没有就写"暂未发现替代�
 
 ---
 
-**3c. 计算 sourceHash**
+**3b. 计算 sourceHash**
 
 ```
 node -e "const c=require('crypto'),f=require('fs');console.log(c.createHash('sha256').update(f.readFileSync(process.argv[1])).digest('hex'))" <组件文件路径>
@@ -240,12 +227,12 @@ node -e "const c=require('crypto'),f=require('fs');console.log(c.createHash('sha
 
 ---
 
-**3d. 保存文件**
+**3c. 保存文件**
 
 按 `references/output-format.md` 中的模板生成并写入：
 
-- `.ai/project-components/components/<组件名>.md`
-- `.ai/project-components/components/<组件名>.metadata.json`
+- `.ai/project-components/components/<组件名>/index.md`
+- `.ai/project-components/components/<组件名>/metadata.json`
 
 保存后不等待，`N += 1`，立即处理下一个。
 
@@ -300,7 +287,7 @@ node -e "const c=require('crypto'),f=require('fs');console.log(c.createHash('sha
 
 > **独立流程。** 仅当用户说"检查组件文档是否过时"或"更新组件文档"时执行，跳过了上述四步流程。
 
-1. 读取 `.ai/project-components/` 下所有 metadata.json，提取 `sourceHash` 和源文件路径
+1. 读取 `.ai/project-components/components/*/metadata.json`，提取每个组件的 `sourceHash` 和源文件路径
 2. 对每个源文件执行 hash 比对：
    ```
    node -e "const c=require('crypto'),f=require('fs');console.log(c.createHash('sha256').update(f.readFileSync(process.argv[1])).digest('hex'))" <源文件路径>
@@ -331,11 +318,10 @@ node -e "const c=require('crypto'),f=require('fs');console.log(c.createHash('sha
 - [ ] `method: "manual-extraction"` 的 props 已全部标 `[? 手工提取，类型待确认]`
 - [ ] 第三步逐组件处理，处理完立即保存
 - [ ] `N === 10` 或批次完成时已暂停汇报，等待用户确认
-- [ ] 每个组件都有 metadata.json（useWhen / dontUseWhen / prefer / sourceHash）
+- [ ] 每个组件目录下都有 `index.md` 和 `metadata.json`
 - [ ] `.component-list.json` 中已完成组件的 status 已更新为 `"done"`
 - [ ] README.md 索引覆盖所有已处理组件
 - [ ] 每个 .md 格式严格按 `references/output-format.md` 模板
-- [ ] 有效接口表含使用率 + 冗余标记 + any 反推
 - [ ] dontUseWhen 每条给出了替代方案
 - [ ] 每个组件至少 2 个来自真实代码的使用示例，标注了来源路径（从 `collect-usages.mjs` 输出的素材中筛选）
 - [ ] Props 注释符合 `references/jsdoc-guidelines.md` 规范

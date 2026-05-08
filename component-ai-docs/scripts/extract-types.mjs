@@ -182,14 +182,30 @@ function processComponent(filePath, allProjectFiles) {
     };
   }
 
-  // 从 Props block 中提取属性类型
+  // 从 Props block 中提取属性类型（支持跨行嵌套类型）
   const lines = block.split('\n');
   const allTypeNames = new Set();
 
-  for (const line of lines) {
-    const m = line.trim().match(/^\w+\??:\s*(.+?);?\s*$/);
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].trim().match(/^\w+\??:\s*(.+)$/);
     if (m) {
-      const typeNames = extractTypeNames(m[1]);
+      let typeStr = m[1].replace(/;?\s*$/, '').trim();
+      // 跨行合并
+      let depth = 0;
+      for (const ch of typeStr) {
+        if (ch === '{' || ch === '[' || ch === '(') depth++;
+        if (ch === '}' || ch === ']' || ch === ')') depth--;
+      }
+      while (depth !== 0 && i + 1 < lines.length) {
+        i++;
+        const next = lines[i].trim().replace(/;?\s*$/, '');
+        typeStr += ' ' + next;
+        for (const ch of next) {
+          if (ch === '{' || ch === '[' || ch === '(') depth++;
+          if (ch === '}' || ch === ']' || ch === ')') depth--;
+        }
+      }
+      const typeNames = extractTypeNames(typeStr);
       for (const tn of typeNames) allTypeNames.add(tn);
     }
   }
