@@ -177,7 +177,8 @@ function processComponent(filePath, allProjectFiles) {
       if (def) refTypes.push(def);
     }
 
-    const name = basename(filePath, extname(filePath));
+    let name = basename(filePath, extname(filePath));
+    if (name === 'index') name = basename(dirname(filePath));
     return {
       componentName: name,
       file: relPath,
@@ -221,13 +222,13 @@ function processComponent(filePath, allProjectFiles) {
   }
 
   // 提取组件名
-  const name = basename(filePath, extname(filePath));
+  let name = basename(filePath, extname(filePath));
+  if (name === 'index') name = basename(dirname(filePath));
   let cm = source.match(/export\s+default\s+function\s+(\w+)/);
   if (!cm) cm = source.match(/export\s+default\s+memo\s*\(\s*(\w+)/);
   if (!cm) cm = source.match(/export\s+default\s+(\w+)/);
   if (cm && !['function', 'memo', 'forwardRef'].includes(cm[1])) {
-    // name = cm[1];
-    // Actually let me not overwrite the filename-based name for consistency
+    name = cm[1];
   }
 
   return {

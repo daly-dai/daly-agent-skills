@@ -246,7 +246,10 @@ function extractComponentName(source, filePath) {
   if (m) return m[1];
   m = source.match(/export\s+default\s+(\w+)/);
   if (m && !['function', 'memo', 'forwardRef'].includes(m[1])) return m[1];
-  return basename(filePath, extname(filePath));
+  // Fallback: 文件名是 index 时，取父目录名
+  const name = basename(filePath, extname(filePath));
+  if (name === 'index') return basename(dirname(filePath));
+  return name;
 }
 
 // ============================================================
@@ -258,8 +261,9 @@ function processOne(filePath, projectRoot) {
   try {
     source = readFileSync(filePath, 'utf-8');
   } catch {
+    const fallbackName = basename(filePath, extname(filePath));
     return {
-      componentName: basename(filePath, extname(filePath)),
+      componentName: fallbackName === 'index' ? basename(dirname(filePath)) : fallbackName,
       file: filePath,
       success: false,
       method: 'error',

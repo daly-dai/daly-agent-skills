@@ -187,25 +187,31 @@ node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <
 
 **进入条件**: 第二步的 2a/2b/2c 全部完成（`.cache/` 下三个文件均存在）。
 
-**数据来源**：从缓存文件按需读取，不依赖 AI 上下文：
-
-| 数据 | 文件 | 读取方式 |
-|------|------|---------|
-| Props 类型 | `.cache/props.json` | Read 全文，从数组中取 `componentName` 匹配项 |
-| 关联类型 | `.cache/types.json` | 同上 |
-| 使用示例 | `.cache/usages/<组件名>.json` | Read 单个组件文件，直接获取 |
+**核心规则：一次只处理一个组件。该组件的两个文件都写入并验证通过后，再开始下一个。不要批量创建目录、不要批量写入——每个组件独立闭环。**
 
 **初始化计数器 `N = 0`。**
 
-对 `BATCH` 中每个组件，依次执行 3a → 3b → 3c。每处理完一个组件 `N += 1`。
+---
 
-**IF `N < 10` 且 BATCH 中还有剩余组件 → 继续处理下一个。**
+#### 处理单个组件的流程
 
-**IF `N === 10` 或 BATCH 处理完毕 → 暂停，汇报本批摘要（见下方模板），等待用户确认。**
+对当前组件，严格按顺序执行以下步骤。**走完一个组件再走下一个。**
 
 ---
 
-**3a. 推导 metadata**
+**3a. 读取该组件的缓存数据**
+
+从以下文件读取当前组件（`<组件名>`）的数据：
+
+| 数据 | 文件 | 方式 |
+|------|------|------|
+| Props | `.cache/props.json` | Read 全文，取 `componentName` 匹配的那一项 |
+| 关联类型 | `.cache/types.json` | 同上 |
+| 使用示例 | `.cache/usages/<组件名>.json` | Read 该文件 |
+
+---
+
+**3b. 推导 metadata**
 
 按以下模板逐项填空，不知道就写固定话术，不要编造：
 
@@ -219,20 +225,27 @@ prefer:      [搜项目中有无类似组件，没有就写"暂未发现替代�
 
 ---
 
-**3b. 获取 sourceHash**
+**3c. 获取 sourceHash**
 
-从 `.cache/props.json` 中读取当前组件对应的 `sourceHash` 字段（extract-props.mjs 已计算）。
+从 3a 读取的 props 记录中取 `sourceHash` 字段（extract-props.mjs 已预计算）。
 
 ---
 
-**3c. 保存文件**
+**3d. 生成并写入文件**
 
-按 `references/output-format.md` 中的模板生成并写入：
+按 `references/output-format.md` 中的模板生成内容，写入以下两个文件：
 
-- `.ai/project-components/components/<组件名>/index.md`
-- `.ai/project-components/components/<组件名>/metadata.json`
+1. `Write` `.ai/project-components/components/<组件名>/index.md`
+2. `Write` `.ai/project-components/components/<组件名>/metadata.json`
 
-保存后不等待，`N += 1`，立即处理下一个。
+**写入后立即验证：用 `Read` 读取刚写入的两个文件，确认内容非空且格式正确。如果任一文件为空或读取失败，重新写入该文件。验证通过后 `N += 1`。**
+
+---
+
+**3e. 判断下一步**
+
+- **IF `N < 10` 且 BATCH 中还有剩余组件** → 回到 3a，处理下一个组件。
+- **IF `N === 10` 或 BATCH 处理完毕** → 暂停，汇报本批摘要（见下方模板），等待用户确认。
 
 ---
 
@@ -252,7 +265,7 @@ prefer:      [搜项目中有无类似组件，没有就写"暂未发现替代�
 
 **收到"继续" → 重置 `N = 0`：**
 
-- `IF BATCH 中还有剩余组件 → 继续处理下一个。`
+- `IF BATCH 中还有剩余组件 → 继续从 3a 处理下一个。`
 - `IF BATCH 全部完成 → 进入第四步。`
 
 **收到修改意见 → 先修改对应文件，然后 `N -= 1`（本次暂停的批次仍算已处理），询问"继续？"**
@@ -314,9 +327,10 @@ prefer:      [搜项目中有无类似组件，没有就写"暂未发现替代�
 - [ ] 第二步 2b 已批量执行 `extract-types.mjs`（一次 Bash）
 - [ ] 第二步 2c 已批量执行 `collect-usages.mjs`（一次 Bash）
 - [ ] `method: "manual-extraction"` 的 props 已全部标 `[? 手工提取，类型待确认]`
-- [ ] 第三步逐组件处理，处理完立即保存
+- [ ] 第三步逐组件处理，每个组件写入后立即 Read 验证文件非空
+- [ ] 未批量创建目录或批量写入——每个组件独立闭环
 - [ ] `N === 10` 或批次完成时已暂停汇报，等待用户确认
-- [ ] 每个组件目录下都有 `index.md` 和 `metadata.json`
+- [ ] 每个组件目录下都有 `index.md` 和 `metadata.json`，内容非空
 - [ ] `.component-list.json` 中已完成组件的 status 已更新为 `"done"`
 - [ ] README.md 索引覆盖所有已处理组件
 - [ ] 每个 .md 格式严格按 `references/output-format.md` 模板
