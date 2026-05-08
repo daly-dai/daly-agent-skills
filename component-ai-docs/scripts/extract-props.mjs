@@ -18,19 +18,21 @@
  */
 
 import { execSync } from 'child_process';
-import { readFileSync } from 'fs';
-import { resolve, join, basename, extname } from 'path';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { resolve, join, basename, extname, dirname } from 'path';
 
 // ============================================================
 // 参数解析
 // ============================================================
 
 function parseArgs(argv) {
-  const opts = { filePaths: [], projectRoot: process.cwd() };
+  const opts = { filePaths: [], projectRoot: process.cwd(), outputPath: null };
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--project-root' && argv[i + 1]) {
       opts.projectRoot = resolve(argv[++i]);
+    } else if (argv[i] === '--output' && argv[i + 1]) {
+      opts.outputPath = resolve(argv[++i]);
     } else if (!argv[i].startsWith('--')) {
       opts.filePaths.push(resolve(argv[i]));
     }
@@ -40,33 +42,33 @@ function parseArgs(argv) {
 }
 
 // ============================================================
-// 策略 1-3: 通过 CLI 调用 react-docgen
+// 策略探测：启动时探测一次，找到可用策略后全量复用
 // ============================================================
 
-function tryCliStrategies(filePath, projectRoot) {
-  const strategies = [
-    {
-      label: 'pnpm exec',
-      getCmd: () => `pnpm exec react-docgen --resolver ts "${filePath}"`,
-    },
-    {
-      label: 'npx',
-      getCmd: () => `npx react-docgen --resolver ts "${filePath}"`,
-    },
-  ];
+let cachedStrategy = null;   // null = 未探测, false = 全部不可用, { fn } = 可用
 
-  // 前两种策略
-  for (const s of strategies) {
-    try {
-      const result = execSync(s.getCmd(), {
-        encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
-        cwd: projectRoot, timeout: 15000,
-      });
-      if (result.trim()) return { success: true, output: result, method: s.label };
-    } catch { /* 继续下一个 */ }
-  }
+function probeStrategy(projectRoot) {
+  // 用一个简单文件做探针
+  const probeFile = join(projectRoot, 'package.json');
 
-  // 策略 3: 直接调 node_modules 中的 bin
+  // 策略 1: pnpm exec
+  try {
+    const result = execSync(
+      `pnpm exec react-docgen --version`,
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], cwd: projectRoot, timeout: 15000 }
+    );
+    if (result.trim()) {
+      cachedStrategy = {
+        method: 'pnpm exec',
+        run: (fp) => execSync(`pnpm exec react-docgen --resolver ts "${fp}"`, {
+          encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], cwd: projectRoot, timeout: 30000,
+        }),
+      };
+      return;
+    }
+  } catch { /* 继续 */ }
+
+  // 策略 2: node_modules 中的 bin
   const binPaths = [
     join(projectRoot, 'node_modules', '.bin', 'react-docgen'),
     join(projectRoot, 'node_modules', 'react-docgen', 'bin', 'react-docgen.js'),
@@ -74,15 +76,23 @@ function tryCliStrategies(filePath, projectRoot) {
   ];
   for (const binPath of binPaths) {
     try {
-      const result = execSync(
-        `node "${binPath}" --resolver ts "${filePath}"`,
-        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], cwd: projectRoot, timeout: 15000 }
-      );
-      if (result.trim()) return { success: true, output: result, method: `node ${binPath}` };
+      const result = execSync(`node "${binPath}" --version`, {
+        encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], cwd: projectRoot, timeout: 15000,
+      });
+      if (result.trim()) {
+        cachedStrategy = {
+          method: `node ${binPath}`,
+          run: (fp) => execSync(`node "${binPath}" --resolver ts "${fp}"`, {
+            encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], cwd: projectRoot, timeout: 30000,
+          }),
+        };
+        return;
+      }
     } catch { /* 继续 */ }
   }
 
-  return { success: false };
+  // 全部不可用
+  cachedStrategy = false;
 }
 
 // ============================================================
@@ -234,21 +244,29 @@ function processOne(filePath, projectRoot) {
   }
 
   const componentName = extractComponentName(source, filePath);
-  const cliResult = tryCliStrategies(filePath, projectRoot);
 
-  if (cliResult.success) {
-    const parsed = parseDocgenOutput(cliResult.output);
-    return {
-      componentName, file: filePath,
-      success: true, method: cliResult.method,
-      props: parsed.props, warnings: parsed.warnings,
-    };
+  // 使用缓存的策略（main 中已探测过）
+  if (cachedStrategy) {
+    try {
+      const output = cachedStrategy.run(filePath);
+      if (output.trim()) {
+        const parsed = parseDocgenOutput(output);
+        return {
+          componentName, file: filePath,
+          success: true, method: cachedStrategy.method,
+          props: parsed.props, warnings: parsed.warnings,
+        };
+      }
+    } catch {
+      // 单个文件失败，回退到手工提取
+    }
   }
 
+  // 回退：手工提取
   const manual = manualExtractProps(source);
   return {
     componentName, file: filePath,
-    success: false, method: 'manual-extraction',
+    success: cachedStrategy ? false : false, method: 'manual-extraction',
     props: manual.props, warnings: manual.warnings,
   };
 }
@@ -266,6 +284,16 @@ function main() {
   }
 
   const { filePaths, projectRoot } = opts;
+
+  // 一次性探测可用策略
+  console.error('Probing react-docgen strategy...');
+  probeStrategy(projectRoot);
+  if (cachedStrategy) {
+    console.error(`  Using: ${cachedStrategy.method}`);
+  } else {
+    console.error('  react-docgen not available, using manual extraction for all');
+  }
+
   const results = [];
 
   for (let i = 0; i < filePaths.length; i++) {
@@ -275,7 +303,18 @@ function main() {
     results.push(result);
   }
 
-  console.log(JSON.stringify(results, null, 2));
+  const json = JSON.stringify(results, null, 2);
+
+  // 写入文件（如果指定了 --output）
+  if (opts.outputPath) {
+    const outDir = dirname(opts.outputPath);
+    if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+    writeFileSync(opts.outputPath, json, 'utf-8');
+    console.error(`Saved: ${opts.outputPath}`);
+  }
+
+  // 始终输出到 stdout
+  console.log(json);
 }
 
 main();

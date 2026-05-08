@@ -112,21 +112,31 @@ node <skill-dir>/scripts/scan-components.mjs <项目根目录>
 
 > 如果 `BATCH` 为空，回到第一步 1c 重新选择。
 
-**以下 3 个脚本按顺序执行，每个脚本一次 Bash 调用完成。**
+**断点恢复：每个脚本将结果写入 `.ai/project-components/.cache/`。执行前先检查缓存文件是否存在：**
+
+| 缓存文件 | 对应脚本 | 已存在则跳过 |
+|----------|---------|------------|
+| `.cache/props.json` | 2a | ✅ 跳过 |
+| `.cache/types.json` | 2b | ✅ 跳过 |
+| `.cache/usages.json` | 2c | ✅ 跳过 |
+
+> 如果某个脚本中断（Bash 报错且缓存文件为空/不存在），重新执行该脚本即可，前面的缓存文件不受影响。
+
+**脚本启动时自动探测一次 react-docgen 可用策略，之后全量复用。18 个组件通常在 30-60s 内完成。**
 
 ---
 
 **2a. 批量提取 Props（1 轮）**
 
 ```
-node <skill-dir>/scripts/extract-props.mjs <文件1> <文件2> ... --project-root <项目根目录>
+node <skill-dir>/scripts/extract-props.mjs <文件1> <文件2> ... --project-root <项目根目录> --output .ai/project-components/.cache/props.json
 ```
 
-> 传入 BATCH 中所有组件的文件路径，一次调完。
+> Bash 参数: `timeout: 300000`（5 分钟）。结果同时写入文件和 stdout。
 
-进度输出在 stderr，JSON 结果在 stdout。每个组件独立 try/catch，一个报错不影响其他。
+传入 BATCH 中所有组件的文件路径，一次调完。进度输出在 stderr，JSON 结果在 stdout。每个组件独立 try/catch，一个报错不影响其他。
 
-读取 stdout 的 JSON 数组，按以下规则标记：
+**等待后台任务完成** → 读取 stdout 的 JSON 数组，按以下规则标记：
 
 | 条件 | 标记 |
 |------|------|
@@ -139,10 +149,12 @@ node <skill-dir>/scripts/extract-props.mjs <文件1> <文件2> ... --project-roo
 **2b. 搜索关联类型（1 轮）**
 
 ```
-node <skill-dir>/scripts/extract-types.mjs <文件1> <文件2> ... --project-root <项目根目录>
+node <skill-dir>/scripts/extract-types.mjs <文件1> <文件2> ... --project-root <项目根目录> --output .ai/project-components/.cache/types.json
 ```
 
-> 同样传入 BATCH 中所有组件的文件路径，一次调完。
+> Bash 参数: `timeout: 120000`。
+
+同样传入 BATCH 中所有组件的文件路径，一次调完。
 
 脚本自动完成：读取每个组件的 Props → 提取类型中的 PascalCase 标识符 → 全项目搜索 `interface X` / `type X` 定义 → 输出定义块。
 
@@ -153,10 +165,10 @@ node <skill-dir>/scripts/extract-types.mjs <文件1> <文件2> ... --project-roo
 **2c. 采集使用示例（1 轮）**
 
 ```
-node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <项目根目录>
+node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <项目根目录> --output .ai/project-components/.cache/usages.json
 ```
 
-> 传入 BATCH 中所有组件的名称，一次调完。
+> Bash 参数: `timeout: 120000`。传入 BATCH 中所有组件的**名称**（不是文件路径）。
 
 脚本自动完成：全项目搜索 `import ComponentName` → 找到 `<ComponentName` 的 JSX 使用点 → 每个使用点提取 12 行上下文代码块。
 
@@ -170,7 +182,15 @@ node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <
 
 ### 第三步：逐组件生成文档，每 5 个暂停
 
-**进入条件**: 第二步的 2a/2b/2c 全部完成。
+**进入条件**: 第二步的 2a/2b/2c 全部完成（`.cache/` 下三个文件均存在）。
+
+**数据来源**：从缓存文件读取，不依赖 AI 上下文：
+
+| 数据 | 文件 | 读取时机 |
+|------|------|---------|
+| Props 类型 | `.cache/props.json` | 从数组中取当前组件的 `componentName` 匹配项 |
+| 关联类型 | `.cache/types.json` | 同上 |
+| 使用示例 | `.cache/usages.json` | 同上 |
 
 **初始化计数器 `N = 0`。**
 

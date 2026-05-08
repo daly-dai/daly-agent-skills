@@ -23,18 +23,20 @@
  *   ]
  */
 
-import { readdirSync, readFileSync, statSync } from 'fs';
-import { resolve, relative, join } from 'path';
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'fs';
+import { resolve, relative, join, dirname } from 'path';
 
 // ============================================================
 // 参数解析
 // ============================================================
 
 function parseArgs(argv) {
-  const opts = { componentNames: [], projectRoot: process.cwd() };
+  const opts = { componentNames: [], projectRoot: process.cwd(), outputPath: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--project-root' && argv[i + 1]) {
       opts.projectRoot = resolve(argv[++i]);
+    } else if (argv[i] === '--output' && argv[i + 1]) {
+      opts.outputPath = resolve(argv[++i]);
     } else if (!argv[i].startsWith('--')) {
       opts.componentNames.push(argv[i]);
     }
@@ -170,7 +172,16 @@ function main() {
     console.error(`  ${compName}: ${importFiles.length} import locations, ${allUsages.length} JSX usages`);
   }
 
-  console.log(JSON.stringify(results, null, 2));
+  const json = JSON.stringify(results, null, 2);
+
+  if (opts.outputPath) {
+    const outDir = dirname(opts.outputPath);
+    if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+    writeFileSync(opts.outputPath, json, 'utf-8');
+    console.error(`Saved: ${opts.outputPath}`);
+  }
+
+  console.log(json);
 }
 
 main();
