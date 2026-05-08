@@ -282,12 +282,17 @@ function main() {
   }
 
   // ---- 优先级判定 ----
+  // 规则按顺序套用，命中即停：
+  //   1. refs >= 8                         → high
+  //   2. refs >= 3                         → medium
+  //   3. refs > 0 且有子组件或行数 > 300    → medium（有人用的大组件，至少值得关注）
+  //   4. 其余                              → low
   for (const c of components) {
-    if (c.lineCount > 300 || c.hasSubComponents) {
-      c.priority = 'high';
-    } else if (c.refs >= 8) {
+    if (c.refs >= 8) {
       c.priority = 'high';
     } else if (c.refs >= 3) {
+      c.priority = 'medium';
+    } else if (c.refs > 0 && (c.hasSubComponents || c.lineCount > 300)) {
       c.priority = 'medium';
     } else {
       c.priority = 'low';
