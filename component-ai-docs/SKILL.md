@@ -15,7 +15,7 @@ description: "盘活项目中的存量业务组件，让 AI 认识它们。自�
 
 1. **开发者最了解组件。** `metadata.json` 里的"何时用/何时不用"只有人能写对——Skill 的角色是引导写出来，不是替代判断。
 2. **JSDoc 写给人看的不等于写给 AI 看的。** "用户名称"是给人看的，"必填，用于表格列渲染和搜索条件"是给 AI 看的。
-3. **先盘核心，再补全量。** 20 个组件里高频使用的可能就 5 个，优先盘活这几个。
+3. **先盘核心，再补全量。** 20 个组件里高频使用的可能就 10 个，优先盘活这几个。
 4. **真实案例胜过编造示例。** 项目里已有大量使用案例，搜集它们比 AI 编造示例更有价值。
 
 ## 参考文档
@@ -77,7 +77,7 @@ node <skill-dir>/scripts/scan-components.mjs <项目根目录>
 ```
 组件清单（2024-01-15 创建）：
 
-=== 高优先级（5 个）===
+=== 高优先级（10 个）===
   ✅ UserTable        — 已完成
   ⬜ SearchForm       — 未处理
   ⬜ DataTable        — 未处理
@@ -183,7 +183,7 @@ node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <
 
 ---
 
-### 第三步：逐组件生成文档，每 5 个暂停
+### 第三步：逐组件生成文档，每 10 个暂停
 
 **进入条件**: 第二步的 2a/2b/2c 全部完成（`.cache/` 下三个文件均存在）。
 
@@ -199,9 +199,9 @@ node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <
 
 对 `BATCH` 中每个组件，依次执行 3a → 3b → 3c → 3d。每处理完一个组件 `N += 1`。
 
-**IF `N < 5` 且 BATCH 中还有剩余组件 → 继续处理下一个。**
+**IF `N < 10` 且 BATCH 中还有剩余组件 → 继续处理下一个。**
 
-**IF `N === 5` 或 BATCH 处理完毕 → 暂停，汇报本批摘要（见下方模板），等待用户确认。**
+**IF `N === 10` 或 BATCH 处理完毕 → 暂停，汇报本批摘要（见下方模板），等待用户确认。**
 
 ---
 
@@ -251,7 +251,7 @@ node -e "const c=require('crypto'),f=require('fs');console.log(c.createHash('sha
 
 ---
 
-**暂停汇报模板（`N === 5` 或 BATCH 完成时使用）：**
+**暂停汇报模板（`N === 10` 或 BATCH 完成时使用）：**
 
 ```
 完成第 X-Y 个组件，metadata 摘要：
@@ -330,7 +330,7 @@ node -e "const c=require('crypto'),f=require('fs');console.log(c.createHash('sha
 - [ ] 第二步 2c 已批量执行 `collect-usages.mjs`（一次 Bash）
 - [ ] `method: "manual-extraction"` 的 props 已全部标 `[? 手工提取，类型待确认]`
 - [ ] 第三步逐组件处理，处理完立即保存
-- [ ] `N === 5` 或批次完成时已暂停汇报，等待用户确认
+- [ ] `N === 10` 或批次完成时已暂停汇报，等待用户确认
 - [ ] 每个组件都有 metadata.json（useWhen / dontUseWhen / prefer / sourceHash）
 - [ ] `.component-list.json` 中已完成组件的 status 已更新为 `"done"`
 - [ ] README.md 索引覆盖所有已处理组件
