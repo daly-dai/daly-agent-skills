@@ -20,6 +20,7 @@
 
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'fs';
 import { resolve, relative, join, basename, extname, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 // ============================================================
 // 参数解析
@@ -47,7 +48,7 @@ const EXCLUDE_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '.next', 'coverage', '__pycache__', '.turbo', 'out', 'public',
 ]);
 
-function walkDir(dir) {
+export function walkDir(dir) {
   const results = [];
   let entries;
   try { entries = readdirSync(dir); } catch { return results; }
@@ -133,7 +134,7 @@ function findTypeDefinition(typeName, allFiles) {
 // 提取组件文件中的 Props 类型引用
 // ============================================================
 
-function processComponent(filePath, allProjectFiles) {
+export function processComponent(filePath, allProjectFiles) {
   const relPath = relative(process.cwd(), filePath).replace(/\\/g, '/');
   let source;
   try { source = readFileSync(filePath, 'utf-8'); } catch { return null; }
@@ -276,4 +277,5 @@ function main() {
   console.log(json);
 }
 
-main();
+const __filename = fileURLToPath(import.meta.url);
+if (process.argv[1] === __filename) main();

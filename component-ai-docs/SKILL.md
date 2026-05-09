@@ -26,34 +26,34 @@ description: "盘活项目中的存量业务组件，让 AI 认识它们。自�
 |------|------|--------|
 | `references/output-format.md` | 目录结构、.md 模板、metadata.json 规范 | 第三步生成文件时 |
 | `references/jsdoc-guidelines.md` | JSDoc 写法规范 | 第三步写 Props 注释时 |
+| `references/flowchart.md` | 完整流程图 + 脚本职责一览 | 不确定当前步骤/分支时 |
 
 ## 执行流程（状态机）
 
-> **规则：每步执行完后，根据末尾的 `→` 指令跳转。遇到 `IF...THEN...ELSE...` 时只走一条分支。不自行判断流程。**
+> **规则：每步执行完后，根据末尾的 `→` 指令跳转。遇到 `IF...THEN...ELSE...` 时只走一条分支。**
 
 ---
 
-### 第一步：获取组件清单
+### 入口：就绪检查
 
 **进入条件**: Skill 被触发，且非"检查组件文档是否过时"意图。
 
-**1a. 检查清单是否存在**
+---
+
+**0a. 检查清单**
 
 检查 `.ai/project-components/.component-list.json`。
 
-**IF 不存在 → 执行 1b（首次扫描）。**
-
-**IF 存在 → 执行 1c（展示进度）。**
+**IF 不存在 → 执行 0b（首次扫描）。**
+**IF 存在 → 跳到 0c（展示进度）。**
 
 ---
 
-**1b. 首次扫描（运行脚本）**
+**0b. 首次扫描**
 
 ```
 node <skill-dir>/scripts/scan-components.mjs <项目根目录>
 ```
-
-脚本参数：
 
 | 参数 | 用途 |
 |------|------|
@@ -62,15 +62,15 @@ node <skill-dir>/scripts/scan-components.mjs <项目根目录>
 | `--patterns <p1,p2>` | 自定义 glob 模式 |
 | `--output <path>` | 自定义输出路径 |
 
-**脚本输出 "No component files matched any pattern"** → 告知用户，询问 `--dir` 路径后重新执行，然后回到本步开头。
+**脚本输出 "No component files matched any pattern"** → 告知用户，询问 `--dir` 路径后重新执行 0b。
 
-**脚本输出 "WARNING: More than 30 components"** → 告知用户建议缩小范围，询问是否继续。用户说继续 → 沿用结果；用户指定新范围 → 加 `--dir` 重新执行。
+**脚本输出 "WARNING: More than 30 components"** → 告知用户建议缩小范围，询问是否继续。用户说继续 → 沿用结果；用户指定新范围 → 加 `--dir` 重新执行 0b。
 
-**脚本成功** → 自动进入 1c。
+**脚本成功** → 进入 0c。
 
 ---
 
-**1c. 展示进度**
+**0c. 展示进度**
 
 读取 `.component-list.json`。状态符号：`✅`=done, `⬜`=pending, `⏭️`=skipped, `🚫`=deprecated。
 
@@ -100,94 +100,64 @@ node <skill-dir>/scripts/scan-components.mjs <项目根目录>
 
 **IF 所有 `pending` 组件已全部处理完** → 提示"全部完成"，流程结束。
 
-> 用户选择后 → 进入第二步。
+---
+
+**0d. 检查缓存**
+
+检查 `.ai/project-components/.cache/` 下是否存在组件级缓存文件（如 `Button.json`, `Modal.json`）。
+
+**IF 存在 → 材料已就绪，直接进入第三步（生成文档）。**
+
+**IF 不存在（目录为空或无 .json 文件） → 进入第二步（准备材料）。**
 
 ---
 
-### 第二步：批量搜集数据（3 轮脚本）
+### 第二步：准备材料（条件性）
 
-**进入条件**: 用户已选择优先级（高/中/低）。
+**进入条件**: 入口 0d 检查发现 `.cache/` 下无组件级缓存文件。
 
 从 `.component-list.json` 中取出该优先级下 `status === "pending"` 的组件列表，记为 `BATCH`。
 
-> 如果 `BATCH` 为空，回到第一步 1c 重新选择。
+> 如果 `BATCH` 为空，回到 0c 重新选择。
 
-**断点恢复：每个脚本将结果写入 `.ai/project-components/.cache/`。执行前先检查缓存文件是否存在：**
-
-| 缓存文件 | 对应脚本 | 已存在则跳过 |
-|----------|---------|------------|
-| `.cache/props.json` | 2a | ✅ 跳过 |
-| `.cache/types.json` | 2b | ✅ 跳过 |
-| `.cache/usages.json` | 2c | ✅ 跳过 |
-
-> 如果某个脚本中断（Bash 报错且缓存文件为空/不存在），重新执行该脚本即可，前面的缓存文件不受影响。
-
-**脚本启动时自动探测一次 react-docgen 可用策略，之后全量复用。18 个组件通常在 30-60s 内完成。**
+**执行策略：一次 Bash 完成 Props 提取 + 关联类型 + 使用示例采集 + 合并。需要更新时删掉 `.cache/` 目录重跑即可，不做单个文件断点恢复。**
 
 ---
 
-**2a. 批量提取 Props（1 轮）**
+**2a. 运行 prepare 脚本（1 轮）**
 
 ```
-node <skill-dir>/scripts/extract-props.mjs <文件1> <文件2> ... --project-root <项目根目录> --output .ai/project-components/.cache/props.json
+node <skill-dir>/scripts/prepare.mjs <文件1> <文件2> ... --project-root <项目根目录> --output-dir .ai/project-components/.cache
 ```
 
-> Bash 参数: `timeout: 300000`（5 分钟）。结果同时写入文件和 stdout。
+> Bash 参数: `timeout: 300000`（5 分钟）。
 
-传入 BATCH 中所有组件的文件路径，一次调完。进度输出在 stderr，JSON 结果在 stdout。每个组件独立 try/catch，一个报错不影响其他。
+传入 BATCH 中所有组件的文件路径，一次调完。脚本内部调度 Props 提取、关联类型搜索、使用示例采集、合并输出。
 
-**等待后台任务完成** → 读取 stdout 的 JSON 数组，按以下规则标记：
+产出：`.cache/<组件名>.json`（每个组件一个，含 componentName / sourceHash / props / referencedTypes / usages）。
+
+脚本启动时自动探测 react-docgen 可用策略。每个组件独立 try/catch，一个报错不影响其他。
+
+**等待任务完成** → 检查 `method` 和 `props[].type` 标记：
 
 | 条件 | 标记 |
 |------|------|
-| `success: true` + `method !== "manual-extraction"` | 类型可信，直接用 |
-| `success: false` 或 `method === "manual-extraction"` | 所有 prop 标 `[? 手工提取，类型待确认]` |
+| `method === "manual-extraction"` 的组件 | 该组件的所有 prop 标 `[? 手工提取，类型待确认]` |
 | 单个 prop 的 `type === "any"` 或 `"unknown"` | 标 `[? 类型不明确]` |
 
 ---
 
-**2b. 搜索关联类型（1 轮）**
-
-```
-node <skill-dir>/scripts/extract-types.mjs <文件1> <文件2> ... --project-root <项目根目录> --output .ai/project-components/.cache/types.json
-```
-
-> Bash 参数: `timeout: 120000`。
-
-同样传入 BATCH 中所有组件的文件路径，一次调完。
-
-脚本自动完成：读取每个组件的 Props → 提取类型中的 PascalCase 标识符 → 全项目搜索 `interface X` / `type X` 定义 → 输出定义块。
-
-读取 stdout 的 JSON，每个组件得到 `referencedTypes` 数组，供第三步填入"组合组件引用"。
+> 脚本执行完毕 → 进入第三步。
 
 ---
 
-**2c. 采集使用示例（1 轮）**
+### 第三步：逐组件生成文档，每 5 个暂停
 
-```
-node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <项目根目录> --output-dir .ai/project-components/.cache/usages
-```
+**进入条件**: `.cache/` 下存在组件级缓存文件（第二步 produce 产出）。
 
-> Bash 参数: `timeout: 120000`。传入 BATCH 中所有组件的**名称**（不是文件路径）。
+> 🛑 **阶段二铁律：所有材料都在 .cache/<组件名>.json 里。不读组件源码、不跑脚本、不 Glob/Grep 项目目录。每个组件只读一个文件。**
 
-脚本按组件拆分输出，避免单个大 JSON 撑爆上下文：
-- `.cache/usages/CompA.json` — 每个组件一个文件，包含 `usages` 数组
-- stdout — 只输出摘要（组件名 → 使用次数）
-- stderr — 进度日志
-
-第三步处理单个组件时，直接 `Read .cache/usages/<组件名>.json` 获取该组件的使用示例。
-
----
-
-> 三个脚本全部执行完毕 → 进入第三步。
-
----
-
-### 第三步：逐组件生成文档，每 10 个暂停
-
-**进入条件**: 第二步的 2a/2b/2c 全部完成（`.cache/` 下三个文件均存在）。
-
-**核心规则：一次只处理一个组件。该组件的两个文件都写入并验证通过后，再开始下一个。不要批量创建目录、不要批量写入——每个组件独立闭环。**
+**核心规则：一次只处理一个组件。写入并验证通过后再开始下一个。不批量创建目录、不批量写入。**
 
 **初始化计数器 `N = 0`。**
 
@@ -195,39 +165,35 @@ node <skill-dir>/scripts/collect-usages.mjs <CompA> <CompB> ... --project-root <
 
 #### 处理单个组件的流程
 
-对当前组件，严格按顺序执行以下步骤。**走完一个组件再走下一个。**
+对当前组件，严格按顺序执行 3a → 3b → 3c → 3d。**走完一个组件再走下一个。**
 
 ---
 
-**3a. 读取该组件的缓存数据**
+**3a. 读取该组件的缓存**
 
-从以下文件读取当前组件（`<组件名>`）的数据：
+`Read` `.cache/<组件名>.json`。
 
-| 数据 | 文件 | 方式 |
-|------|------|------|
-| Props | `.cache/props.json` | Read 全文，取 `componentName` 匹配的那一项 |
-| 关联类型 | `.cache/types.json` | 同上 |
-| 使用示例 | `.cache/usages/<组件名>.json` | Read 该文件 |
+该文件包含 componentName、sourceHash、props、referencedTypes、usages。一次读取，全部数据到位。
 
 ---
 
 **3b. 推导 metadata**
 
-按以下模板逐项填空，不知道就写固定话术，不要编造：
+从缓存数据推导，按以下模板逐项填空：
 
 ```
-useWhen:     [看组件源码核心逻辑，用一句业务语言描述]
-dontUseWhen: [看源码条件分支——什么情况不渲染/返回 null？没有就写"暂未发现排除场景"]
-prefer:      [搜项目中有无类似组件，没有就写"暂未发现替代方案"]
+useWhen:     [从 usages 的使用场景 + props 接口用一句业务语言描述]
+dontUseWhen: [从 usages 覆盖不到的场景反推。没有就写"暂未发现排除场景"]
+prefer:      [从 referencedTypes 的类型名搜同目录下有无类似组件名。没有就写"暂未发现替代方案"]
 ```
 
-每项前面标 `[? 待确认]`。
+不知道就写固定话术，不要编造。每项前面标 `[? 待确认]`。
 
 ---
 
 **3c. 获取 sourceHash**
 
-从 3a 读取的 props 记录中取 `sourceHash` 字段（extract-props.mjs 已预计算）。
+从 3a 读取的 JSON 中取 `sourceHash` 字段。
 
 ---
 
@@ -244,12 +210,12 @@ prefer:      [搜项目中有无类似组件，没有就写"暂未发现替代�
 
 **3e. 判断下一步**
 
-- **IF `N < 10` 且 BATCH 中还有剩余组件** → 回到 3a，处理下一个组件。
-- **IF `N === 10` 或 BATCH 处理完毕** → 暂停，汇报本批摘要（见下方模板），等待用户确认。
+- **IF `N < 5` 且 BATCH 中还有剩余组件** → 回到 3a，处理下一个组件。
+- **IF `N === 5` 或 BATCH 处理完毕** → 暂停，汇报本批摘要（见下方模板），等待用户确认。
 
 ---
 
-**暂停汇报模板（`N === 10` 或 BATCH 完成时使用）：**
+**暂停汇报模板（`N === 5` 或 BATCH 完成时使用）：**
 
 ```
 完成第 X-Y 个组件，metadata 摘要：
@@ -290,7 +256,7 @@ prefer:      [搜项目中有无类似组件，没有就写"暂未发现替代�
 总进度：M / N（高优 M1/N1, 中优 M2/N2, 低优 M3/N3）
 ```
 
-**→ 流程结束。** 下次新建任务触发本 skill，从第一步 1a 继续处理剩余组件。
+**→ 流程结束。** 下次新建任务触发本 skill，从入口 0a 继续处理剩余组件。
 
 ---
 
@@ -311,7 +277,7 @@ prefer:      [搜项目中有无类似组件，没有就写"暂未发现替代�
   ❌ StatusBadge   — 源码已变更（旧 hash: a1b2..., 新 hash: e5f6...），文档可能过时
   ✅ DataChart     — 文档与源码一致
 
-共 N 个组件：X 个一致，Y 个可能过时。建议对过时组件重新执行第二步和第三步。
+共 N 个组件：X 个一致，Y 个可能过时。建议对过时组件重新执行准备材料和生成文档步骤。
 ```
 
 > 此检测只读不写，零风险。
@@ -320,20 +286,18 @@ prefer:      [搜项目中有无类似组件，没有就写"暂未发现替代�
 
 ## 验证清单
 
-- [ ] 第一步已执行 `scan-components.mjs`，脚本成功输出 `.component-list.json`
+- [ ] 入口 0b 已执行 `scan-components.mjs`，脚本成功输出 `.component-list.json`
 - [ ] 脚本输出 "No component files matched" 时，已询问用户指定 `--dir`
 - [ ] 脚本输出 "More than 30 components" 时，已建议缩小范围
-- [ ] 第二步 2a 已批量执行 `extract-props.mjs`（一次 Bash），检查了每个组件的 `success` 和 `method`
-- [ ] 第二步 2b 已批量执行 `extract-types.mjs`（一次 Bash）
-- [ ] 第二步 2c 已批量执行 `collect-usages.mjs`（一次 Bash）
+- [ ] 第二步 2a 已执行 `prepare.mjs`（一次 Bash），产出 `.cache/<组件名>.json`
 - [ ] `method: "manual-extraction"` 的 props 已全部标 `[? 手工提取，类型待确认]`
 - [ ] 第三步逐组件处理，每个组件写入后立即 Read 验证文件非空
 - [ ] 未批量创建目录或批量写入——每个组件独立闭环
-- [ ] `N === 10` 或批次完成时已暂停汇报，等待用户确认
+- [ ] `N === 5` 或批次完成时已暂停汇报，等待用户确认
 - [ ] 每个组件目录下都有 `index.md` 和 `metadata.json`，内容非空
 - [ ] `.component-list.json` 中已完成组件的 status 已更新为 `"done"`
 - [ ] README.md 索引覆盖所有已处理组件
 - [ ] 每个 .md 格式严格按 `references/output-format.md` 模板
 - [ ] dontUseWhen 每条给出了替代方案
-- [ ] 每个组件至少 2 个来自真实代码的使用示例，标注了来源路径（从 `collect-usages.mjs` 输出的素材中筛选）
+- [ ] 每个组件至少 2 个来自真实代码的使用示例，标注了来源路径（从 `.cache/<组件名>.json` 的 usages 中筛选）
 - [ ] Props 注释符合 `references/jsdoc-guidelines.md` 规范

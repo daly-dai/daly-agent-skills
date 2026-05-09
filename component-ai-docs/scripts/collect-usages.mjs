@@ -25,6 +25,7 @@
 
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'fs';
 import { resolve, relative, join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 // ============================================================
 // 参数解析
@@ -54,7 +55,7 @@ const EXCLUDE_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '.next', 'coverage', '__pycache__', '.turbo', 'out', 'public',
 ]);
 
-function walkDir(dir) {
+export function walkDir(dir) {
   const results = [];
   let entries;
   try { entries = readdirSync(dir); } catch { return results; }
@@ -73,7 +74,7 @@ function walkDir(dir) {
 // 在一个文件中搜索组件的 import 和 JSX 使用
 // ============================================================
 
-function findInFile(filePath, componentName) {
+export function findInFile(filePath, componentName) {
   let content;
   try { content = readFileSync(filePath, 'utf-8'); } catch { return null; }
 
@@ -201,4 +202,5 @@ function main() {
   console.log(JSON.stringify(summary, null, 2));
 }
 
-main();
+const __filename = fileURLToPath(import.meta.url);
+if (process.argv[1] === __filename) main();

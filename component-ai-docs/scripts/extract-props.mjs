@@ -21,6 +21,7 @@ import { execSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { createHash } from 'crypto';
 import { resolve, join, basename, extname, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 // ============================================================
 // 参数解析
@@ -48,7 +49,7 @@ function parseArgs(argv) {
 
 let cachedStrategy = null;   // null = 未探测, false = 全部不可用, { fn } = 可用
 
-function probeStrategy(projectRoot) {
+export function probeStrategy(projectRoot) {
   // 用一个简单文件做探针
   const probeFile = join(projectRoot, 'package.json');
 
@@ -256,7 +257,7 @@ function extractComponentName(source, filePath) {
 // 处理单个组件
 // ============================================================
 
-function processOne(filePath, projectRoot) {
+export function processOne(filePath, projectRoot) {
   let source;
   try {
     source = readFileSync(filePath, 'utf-8');
@@ -350,4 +351,5 @@ function main() {
   console.log(json);
 }
 
-main();
+const __filename = fileURLToPath(import.meta.url);
+if (process.argv[1] === __filename) main();
