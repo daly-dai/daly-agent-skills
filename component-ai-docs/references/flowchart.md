@@ -59,12 +59,12 @@
     │  │  Props + Types  │ │  │
     │  │  + Usages       │ │  │
     │  │  → .cache/      │ │  │
-    │  │   <Comp>.json   │ │  │
+    │  │   <id>.json      │ │  │
     │  └───────┬────────┘ │  │
     └──────────┼──────────┘  │
                │             │
                ▼             │
-        .cache/<Comp>.json ═╝
+        .cache/<id>.json ═╝
                │
                ▼
 ┌─────────────────────────────────────────┐
@@ -74,7 +74,7 @@
 │  ┌──────────────────────────────────┐   │
 │  │  对 BATCH 中下一个组件:           │   │
 │  │                                   │   │
-│  │  3a. Read .cache/<组件名>.json    │   │
+│  │  3a. Read .cache/<id>.json        │   │
 │  │  (props + types + usages          │   │
 │  │   + sourceHash 一次到位)          │   │
 │  │                                   │   │
@@ -153,22 +153,22 @@
 | 脚本 | 步骤 | 输入 | 输出 | 耗时 |
 |------|------|------|------|------|
 | `scan-components.mjs` | 0b | 项目根目录 | `.component-list.json` | ~5s |
-| `prepare.mjs` | 2a | 文件路径列表 | `.cache/<组件名>.json` | ~30s |
-| (AI) | 3 | `.cache/<组件名>.json` | `components/<Comp>/index.md` + `metadata.json` | 每组件 ~2轮 |
+| `prepare.mjs` | 2a | 文件路径列表 | `.cache/<组件id>.json` | ~30s |
+| (AI) | 3 | `.cache/<组件id>.json` | `components/<组件id>/index.md` + `metadata.json` | 每组件 ~2轮 |
 
 ## 文件结构
 
 ```
 .ai/project-components/
-├── .component-list.json          # 组件清单 (入口产出)
+├── .component-list.json          # 组件清单 (入口产出，条目含 id 字段)
 ├── .cache/                       # 组件级缓存 (第二步产出)
-│   ├── Button.json               #   props + types + usages + sourceHash
-│   └── Modal.json
+│   ├── Button__src-components-Button.json    #   props + types + usages + sourceHash
+│   └── Modal__src-components-Modal.json
 ├── components/                   # 文档 (第三步产出)
-│   ├── CompA/
+│   ├── Button__src-components-Button/
 │   │   ├── index.md
 │   │   └── metadata.json
-│   └── CompB/
+│   └── Modal__src-components-Modal/
 │       ├── index.md
 │       └── metadata.json
 └── README.md                     # 索引 (第四步产出)

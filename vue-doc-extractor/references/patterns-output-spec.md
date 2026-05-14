@@ -40,3 +40,45 @@
 3. **标注 `[常量]` 标记**，使迁移方能快速区分常量与动态数据（API 返回的、运行时计算的）
 4. 常量名本身作为业务标识应保留原名（如 `STATUS_MAP`、`ORDER_TYPE_OPTIONS`）
 5. 如果常量值过长（如超过 10 个选项的列表），在引用位置可简写为 `[常量] STATUS_MAP (共12项，详见常量定义章节)`，完整值放在常量定义章节
+
+
+---
+
+## 补充规则（对齐 patterns-core.md 第 9 节）
+
+### 路径输出禁止
+
+🛑 输出文档中**绝对禁止出现任何文件路径**，包括但不限于：
+
+- `src/views/order/OrderList.vue`
+- `src/api/order.ts`
+- `@/api/user`
+- `@/enums/order`
+- `./components/OrderForm.vue`
+- `./constants.ts`
+- `src/composables/useOrder.ts`
+
+**替代方式**：用功能描述替代路径。
+
+| 禁止写法 | 正确写法 |
+|---------|---------|
+| `src/views/order/OrderList.vue` | 页面名称：订单列表页 |
+| `src/api/order.ts` | 订单模块接口 |
+| `./components/OrderForm.vue` | 订单表单弹窗组件 |
+| `./constants.ts 中的 STATUS_MAP` | `[常量] STATUS_MAP: {...}` (内联实际值) |
+
+### 自检清单（每次填充 @FILL 标记后执行）
+
+在输出任何 @FILLED 内容前，逐条检查：
+
+1. □ 输出中无 `a-*`、`el-*`、`van-*` 等组件标签名
+2. □ 输出中无 `ref()`、`reactive()`、`computed()`、`watch()` 等框架 API
+3. □ 输出中无 `router.push`、`route.params`、`useRoute` 等路由 API
+4. □ 输出中无 `src/`、`@/`、`./`、`../` 等路径字符串
+5. □ 输出中无 `v-if`、`v-model`、`@click` 等框架指令
+6. □ 输出中无 `onMounted`、`onUnmounted` 等生命周期函数名
+7. □ 输出中无 `message.success`、`ElMessage`、`Modal.confirm` 等框架消息函数
+8. □ 所有枚举值已内联实际值（标注 `[常量]`）
+9. □ 所有操作按钮的行为用自然语言描述，不用框架 API
+
+> 如任一条未通过 → 参照 patterns-core.md 第 9 节翻译表修正 → 重新检查。

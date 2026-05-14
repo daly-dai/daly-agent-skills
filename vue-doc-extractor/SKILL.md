@@ -15,6 +15,7 @@ description: "从 Vue 3 页面组件中提取框架无关的产品文档(Markdow
 - **描述业务逻辑，而非框架实现**：输出"下拉选择"而非"a-select"，输出"文本输入框"而非"a-input"
 - **数据流转是重点**：页面间跳转传了什么参数、弹窗打开传了什么数据、表单提交如何组装参数、编辑时数据如何回显 — 这些是最有价值的信息
 - **说清楚"为什么"**：不只是列字段，要说明业务含义、联动原因、权限逻辑
+- **输出为 PRD 可消费格式**：提取产物应可直接作为技术蓝图的输入，聚焦"数据是什么"和"行为是什么"，不描述框架实现
 
 ## 输入格式
 
@@ -62,11 +63,11 @@ description: "从 Vue 3 页面组件中提取框架无关的产品文档(Markdow
 
 #### 2.1 检测 UI 库
 
-运行 `scripts/detect-ui-lib.sh <项目根目录>` 检测项目使用的组件库。
+运行 `node scripts/detect-ui-lib.mjs <项目根目录>` 检测项目使用的组件库。
 
-检测结果为**空格分隔的库标识列表**，例如：`antd`、`element`、`vant`、`antd element`、`unknown`。
+检测结果为**空格分隔的库标识列表**，例如：`antd`、`element`、`antd element`、`unknown`。
 
-> 新增组件库时，只需在 `scripts/detect-ui-lib.sh` 中添加对应的检测规则，无需修改本 SKILL.md。
+> 新增组件库时，只需在 `scripts/detect-ui-lib.mjs` 中添加对应的检测规则，无需修改本 SKILL.md。
 
 #### 2.2 加载通用模式
 
@@ -99,7 +100,7 @@ description: "从 Vue 3 页面组件中提取框架无关的产品文档(Markdow
    - 对**本地 composable/hook** 文件：使用 Read 读取，提取其中的 API 调用和状态逻辑
    - 对**本地 API 模块**文件：使用 Read 读取，提取 API 函数签名和请求路径
    - 对**本地子组件**（弹窗/抽屉等）：如果用户提供了关联文件则读取分析，否则仅记录组件名和路径
-   - 对**第三方库**：根据组件标签前缀识别对应组件库（如 `a-*` → Ant Design Vue、`el-*` → Element Plus、`van-*` → Vant 等），具体映射关系参考 `patterns-ui-mapping.md`
+   - 对**第三方库**：根据组件标签前缀识别对应组件库（如 `a-*` → Ant Design Vue、`el-*` → Element Plus 等），具体映射关系参考 `patterns-ui-mapping.md`
 
 3. **如果用户提供了关联文件**：逐一读取并纳入分析范围。
 
@@ -178,7 +179,30 @@ description: "从 Vue 3 页面组件中提取框架无关的产品文档(Markdow
 
 6. **组装模块文档**：将各页面 @FILLED 内容按 `scenario-module.md` 组装模板拼装为单个文档
 
-### Step 5: 组装输出文档
+### Step 5: 输出自检（🛑 必执行）
+
+在所有 @FILL 标记填充完成后、组装文档前，**必须**逐条执行以下检查：
+
+1. **读翻译规则表**：Read `references/patterns-core.md` 第 9 节
+
+2. **逐 @FILLED 扫描**，确认不包含 `patterns-core.md` 第 9.7 节列出的任何禁止项：
+   - 无 UI 组件标签名（`a-*`、`el-*`、`van-*`）
+   - 无框架 API（`ref`、`reactive`、`computed`、`watch`、`defineProps`）
+   - 无路由 API（`router.push`、`route.params`）
+   - 无文件路径（`src/`、`@/`、`./`、`../`）
+   - 无框架指令（`v-if`、`v-model`、`@click`）
+   - 无生命周期函数名（`onMounted`）
+   - 无框架消息函数（`message.success`、`ElMessage`、`Modal.confirm`）
+
+3. **如发现禁止项** → 对照 `patterns-core.md` 第 9.1-9.6 节翻译表 → 替换 → 重新输出该 @FILLED
+
+4. **确认所有枚举/常量值已内联**（标注 `[常量]`，含实际值）
+
+5. **确认所有操作行为用自然语言描述**，不出现框架特定写法
+
+> ⛔ 此步骤不可跳过。未通过自检的 @FILLED 内容禁止进入文档组装阶段。
+
+### Step 6: 组装输出文档
 
 将 Step 4 填充的 `@FILLED` 内容，按 `scenario-{场景类型}.md` 中的**组装模板**拼装为最终 Markdown 文档。
 

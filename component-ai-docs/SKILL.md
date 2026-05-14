@@ -94,6 +94,8 @@ node <skill-dir>/scripts/scan-components.mjs <项目根目录>
 已完成 1/20，已跳过 1，已废弃 1。
 ```
 
+> 若多个组件同名（不同路径），通过 `id` 或 `file` 字段区分显示。
+
 询问用户：**请选择本次处理的优先级：高 / 中 / 低？**
 
 **IF 某个优先级内所有组件 `status` 都不是 `pending`** → 该优先级显示"全部已完成"，不可选。
@@ -104,7 +106,7 @@ node <skill-dir>/scripts/scan-components.mjs <项目根目录>
 
 **0d. 检查缓存**
 
-检查 `.ai/project-components/.cache/` 下是否存在组件级缓存文件（如 `Button.json`, `Modal.json`）。
+检查 `.ai/project-components/.cache/` 下是否存在组件级缓存文件（如 `Button__src-components-Button.json`）。
 
 **IF 存在 → 材料已就绪，直接进入第三步（生成文档）。**
 
@@ -134,9 +136,9 @@ node <skill-dir>/scripts/prepare.mjs <文件1> <文件2> ... --project-root <项
 
 传入 BATCH 中所有组件的文件路径，一次调完。脚本内部调度 Props 提取、关联类型搜索、使用示例采集、合并输出。
 
-产出：`.cache/<组件名>.json`（每个组件一个，含 componentName / sourceHash / props / referencedTypes / usages）。
+产出：`.cache/<组件id>.json`（每个组件一个，含 componentName / id / sourceHash / props / referencedTypes / usages）。
 
-脚本启动时自动探测 react-docgen 可用策略。每个组件独立 try/catch，一个报错不影响其他。
+脚本通过 react-docgen-typescript (TypeScript Compiler API) 提取 Props，不可用时回退到手工解析。
 
 **等待任务完成** → 检查 `method` 和 `props[].type` 标记：
 
@@ -155,7 +157,7 @@ node <skill-dir>/scripts/prepare.mjs <文件1> <文件2> ... --project-root <项
 
 **进入条件**: `.cache/` 下存在组件级缓存文件（第二步 produce 产出）。
 
-> 🛑 **阶段二铁律：所有材料都在 .cache/<组件名>.json 里。不读组件源码、不跑脚本、不 Glob/Grep 项目目录。每个组件只读一个文件。**
+> 🛑 **阶段二铁律：所有材料都在 .cache/<组件id>.json 里。不读组件源码、不跑脚本、不 Glob/Grep 项目目录。每个组件只读一个文件。**
 
 **核心规则：一次只处理一个组件。写入并验证通过后再开始下一个。不批量创建目录、不批量写入。**
 
@@ -171,9 +173,9 @@ node <skill-dir>/scripts/prepare.mjs <文件1> <文件2> ... --project-root <项
 
 **3a. 读取该组件的缓存**
 
-`Read` `.cache/<组件名>.json`。
+`Read` `.cache/<组件id>.json`（id 从 `.component-list.json` 对应条目中获取）。
 
-该文件包含 componentName、sourceHash、props、referencedTypes、usages。一次读取，全部数据到位。
+该文件包含 componentName、id、sourceHash、props、referencedTypes、usages。一次读取，全部数据到位。
 
 ---
 
@@ -201,8 +203,8 @@ prefer:      [从 referencedTypes 的类型名搜同目录下有无类似组件�
 
 按 `references/output-format.md` 中的模板生成内容，写入以下两个文件：
 
-1. `Write` `.ai/project-components/components/<组件名>/index.md`
-2. `Write` `.ai/project-components/components/<组件名>/metadata.json`
+1. `Write` `.ai/project-components/components/<组件id>/index.md`
+2. `Write` `.ai/project-components/components/<组件id>/metadata.json`
 
 **写入后立即验证：用 `Read` 读取刚写入的两个文件，确认内容非空且格式正确。如果任一文件为空或读取失败，重新写入该文件。验证通过后 `N += 1`。**
 
@@ -242,7 +244,7 @@ prefer:      [从 referencedTypes 的类型名搜同目录下有无类似组件�
 
 **进入条件**: BATCH 中所有组件已处理完毕且用户确认。
 
-1. 更新 `.component-list.json`：将本批次已处理组件的 `status` 改为 `"done"`
+1. 更新 `.component-list.json`：将本批次已处理组件的 `status` 改为 `"done"`（通过 `id` 定位条目）
 2. 更新 `.ai/project-components/README.md` 索引
 3. 输出汇总：
 
@@ -289,7 +291,7 @@ prefer:      [从 referencedTypes 的类型名搜同目录下有无类似组件�
 - [ ] 入口 0b 已执行 `scan-components.mjs`，脚本成功输出 `.component-list.json`
 - [ ] 脚本输出 "No component files matched" 时，已询问用户指定 `--dir`
 - [ ] 脚本输出 "More than 30 components" 时，已建议缩小范围
-- [ ] 第二步 2a 已执行 `prepare.mjs`（一次 Bash），产出 `.cache/<组件名>.json`
+- [ ] 第二步 2a 已执行 `prepare.mjs`（一次 Bash），产出 `.cache/<组件id>.json`
 - [ ] `method: "manual-extraction"` 的 props 已全部标 `[? 手工提取，类型待确认]`
 - [ ] 第三步逐组件处理，每个组件写入后立即 Read 验证文件非空
 - [ ] 未批量创建目录或批量写入——每个组件独立闭环
@@ -299,5 +301,5 @@ prefer:      [从 referencedTypes 的类型名搜同目录下有无类似组件�
 - [ ] README.md 索引覆盖所有已处理组件
 - [ ] 每个 .md 格式严格按 `references/output-format.md` 模板
 - [ ] dontUseWhen 每条给出了替代方案
-- [ ] 每个组件至少 2 个来自真实代码的使用示例，标注了来源路径（从 `.cache/<组件名>.json` 的 usages 中筛选）
+- [ ] 每个组件至少 2 个来自真实代码的使用示例，标注了来源路径（从 `.cache/<组件id>.json` 的 usages 中筛选）
 - [ ] Props 注释符合 `references/jsdoc-guidelines.md` 规范

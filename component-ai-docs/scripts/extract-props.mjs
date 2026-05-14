@@ -2,8 +2,8 @@
 /**
  * 从组件文件中提取 Props 类型定义（批量模式）。
  *
- * 自动尝试多种策略调用 react-docgen，解析输出为结构化 JSON。
- * 所有策略都失败时，回退到手工解析 TypeScript 源码。
+ * 优先使用 react-docgen-typescript (TypeScript Compiler API)，
+ * 不可用时回退到手工解析 TypeScript 源码。
  * 每个组件的处理完全隔离，一个报错不影响其他。
  *
  * 用法:
@@ -17,7 +17,7 @@
  *   ]
  */
 
-import { execSync } from 'child_process';
+import { createRequire } from 'module';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { createHash } from 'crypto';
 import { resolve, join, basename, extname, dirname } from 'path';
@@ -29,7 +29,6 @@ import { fileURLToPath } from 'url';
 
 function parseArgs(argv) {
   const opts = { filePaths: [], projectRoot: process.cwd(), outputPath: null };
-
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--project-root' && argv[i + 1]) {
       opts.projectRoot = resolve(argv[++i]);
@@ -39,128 +38,92 @@ function parseArgs(argv) {
       opts.filePaths.push(resolve(argv[i]));
     }
   }
-
   return opts;
 }
 
 // ============================================================
-// 策略探测：启动时探测一次，找到可用策略后全量复用
+// react-docgen-typescript API
 // ============================================================
 
-let cachedStrategy = null;   // null = 未探测, false = 全部不可用, { fn } = 可用
+let _docgen = null;
+let _docgenError = null;
 
-export function probeStrategy(projectRoot) {
-  // 用一个简单文件做探针
-  const probeFile = join(projectRoot, 'package.json');
-
-  // 策略 1: pnpm exec
-  try {
-    const result = execSync(
-      `pnpm exec react-docgen --version`,
-      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], cwd: projectRoot, timeout: 15000 }
-    );
-    if (result.trim()) {
-      cachedStrategy = {
-        method: 'pnpm exec',
-        run: (fp) => execSync(`pnpm exec react-docgen --resolver ts "${fp}"`, {
-          encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], cwd: projectRoot, timeout: 30000,
-        }),
-      };
-      return;
-    }
-  } catch { /* 继续 */ }
-
-  // 策略 2: node_modules 中的 bin
-  const binPaths = [
-    join(projectRoot, 'node_modules', '.bin', 'react-docgen'),
-    join(projectRoot, 'node_modules', 'react-docgen', 'bin', 'react-docgen.js'),
-    join(projectRoot, 'node_modules', 'react-docgen', 'dist', 'cli.js'),
-  ];
-  for (const binPath of binPaths) {
+function tryReactDocgenTypescript(filePath, projectRoot) {
+  if (_docgen === null && _docgenError === null) {
     try {
-      const result = execSync(`node "${binPath}" --version`, {
-        encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], cwd: projectRoot, timeout: 15000,
-      });
-      if (result.trim()) {
-        cachedStrategy = {
-          method: `node ${binPath}`,
-          run: (fp) => execSync(`node "${binPath}" --resolver ts "${fp}"`, {
-            encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], cwd: projectRoot, timeout: 30000,
-          }),
-        };
-        return;
-      }
-    } catch { /* 继续 */ }
+      const pkgJsonPath = join(projectRoot, 'package.json');
+      const require_ = createRequire(pkgJsonPath);
+      _docgen = require_('react-docgen-typescript');
+    } catch (err) {
+      _docgenError = err.message;
+      return null;
+    }
+  }
+  if (!_docgen) return null;
+
+  const tsconfigPath = join(projectRoot, 'tsconfig.json');
+  let result;
+  try {
+    const parser = _docgen.withCustomConfig(tsconfigPath, {
+      propFilter: (prop) => {
+        if (prop.parent?.fileName?.includes('node_modules')) return false;
+        return true;
+      },
+      shouldExtractLiteralValuesFromEnum: true,
+      shouldRemoveUndefinedFromOptional: true,
+    });
+    result = parser.parse(filePath);
+  } catch (err) {
+    _docgenError = err.message;
+    return null;
   }
 
-  // 全部不可用
-  cachedStrategy = false;
+  if (!result || result.length === 0) return null;
+  return result[0];
 }
 
-// ============================================================
-// 解析 react-docgen 输出 (markdown → JSON)
-// ============================================================
+function stringifyType(type) {
+  if (!type) return 'unknown';
+  if (type.name === 'union') {
+    return (type.value || []).map(v => ('value' in v ? v.value : v.name)).join(' | ');
+  }
+  if (type.name === 'enum') {
+    if (Array.isArray(type.value)) return type.value.map(v => v.value).join(' | ');
+    return type.value || 'enum';
+  }
+  if (type.name === 'array') return `${stringifyType(type.value)}[]`;
+  if (type.name === 'signature' || type.type === 'object') {
+    const props = (type.signature?.properties || []).map(p => `${p.key}: ${stringifyType(p.value)}`).join(', ');
+    return `{ ${props} }`;
+  }
+  if (type.name === 'intersection') {
+    return (type.value || []).map(v => stringifyType(v)).join(' & ');
+  }
+  return type.name || 'unknown';
+}
 
-function parseDocgenOutput(output) {
+function convertDocgenResult(docgenResult) {
   const props = [];
-  const warnings = [];
-
-  // 表格格式 (新版 react-docgen)
-  const tableHeader = output.match(/\| *Name *\|.*\n\|[-\s|]*\n/);
-  if (tableHeader) {
-    const after = output.slice(tableHeader.index + tableHeader[0].length);
-    const end = after.indexOf('\n\n');
-    const tableContent = end === -1 ? after : after.slice(0, end);
-    const rows = tableContent.trim().split('\n').filter(l => l.includes('|'));
-
-    for (const row of rows) {
-      const cells = row.split('|').map(c => c.trim()).filter(Boolean);
-      if (cells.length < 2) continue;
-      props.push({
-        name: cells[0] || 'unknown',
-        type: (cells[1] || 'unknown').replace(/\*$/, ''),
-        required: (cells[2] || '').toLowerCase() === 'yes',
-        defaultValue: cells[3] === '-' || cells[3] === '' ? null : (cells[3] || null),
-        description: cells.slice(4).join(' | ') || '',
-      });
-    }
-    if (props.length > 0) return { props, warnings };
+  for (const [propName, info] of Object.entries(docgenResult.props || {})) {
+    props.push({
+      name: propName,
+      type: stringifyType(info.type),
+      required: info.required || false,
+      defaultValue: info.defaultValue?.value || null,
+      description: info.description || '',
+    });
   }
-
-  // 列表格式 (旧版 react-docgen)
-  const sections = output.split(/^### /m);
-  for (const section of sections) {
-    if (!section.trim() || section.startsWith('#') || section.startsWith('##')) continue;
-    const lines = section.split('\n');
-    const name = lines[0].trim();
-    const prop = { name, type: 'unknown', required: false, defaultValue: null, description: '' };
-
-    for (const line of lines) {
-      const tl = line.trim();
-      if (tl.startsWith('Type:')) prop.type = tl.replace(/^Type:\s*`?/, '').replace(/`$/, '').trim();
-      else if (tl.startsWith('Required:')) prop.required = tl.toLowerCase().includes('yes');
-      else if (tl.startsWith('Default:')) {
-        const dv = tl.replace(/^Default:\s*`?/, '').replace(/`$/, '').trim();
-        prop.defaultValue = dv === '-' || dv === '' ? null : dv;
-      } else if (tl.startsWith('Description:')) prop.description = tl.replace(/^Description:\s*/, '').trim();
-    }
-
-    if (prop.name && prop.name !== 'Props') props.push(prop);
-  }
-
-  if (props.length === 0) warnings.push('react-docgen succeeded but no props parsed from output');
-  return { props, warnings };
+  return props;
 }
 
 // ============================================================
-// 策略 4: 手工解析 TypeScript 源码 (最后兜底)
+// 手工解析 TypeScript 源码 (兜底)
 // ============================================================
 
 function manualExtractProps(source) {
   const props = [];
-  const warnings = ['react-docgen unavailable, using manual extraction'];
+  const warnings = ['react-docgen-typescript unavailable, using manual extraction'];
 
-  // 查找 Props 接口/类型
   let block = null;
 
   for (const re of [
@@ -171,7 +134,6 @@ function manualExtractProps(source) {
     if (m) { block = m[2]; break; }
   }
 
-  // React.FC<Props> 模式
   if (!block) {
     const m = source.match(/(?:React\.)?FC<(\w*Props)>/);
     if (m) {
@@ -185,7 +147,6 @@ function manualExtractProps(source) {
     return { props, warnings };
   }
 
-  // 逐行解析，累积跨行属性 (参考 gen-llms-txt.ts parsePropsBlock)
   const lines = block.split('\n');
   let pendingComment = '';
   let depth = 0;
@@ -194,10 +155,8 @@ function manualExtractProps(source) {
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
 
-    // 跳过空行和块注释开始/结束标记
     if (!trimmed || trimmed === '{' || trimmed === '}') continue;
 
-    // 累积 JSDoc / 单行注释
     if (trimmed.startsWith('/**') || trimmed.startsWith('*')) {
       pendingComment += trimmed.replace(/^\/?\*+\s*\/?/, '').replace(/^\*\s*/, '').trim() + ' ';
       if (trimmed.endsWith('*/')) pendingComment = pendingComment.replace(/\s*\*\/\s*$/, '').trim();
@@ -205,14 +164,11 @@ function manualExtractProps(source) {
     }
     if (trimmed.startsWith('//')) { pendingComment = trimmed.replace(/^\/\/\s*/, '').trim(); continue; }
 
-    // 累积当前行到 currentProp
     currentProp += (currentProp ? ' ' : '') + trimmed;
 
-    // 统计括号深度 (包括尖括号，用于泛型)
     depth += (trimmed.match(/[{(<[]/g) || []).length;
     depth -= (trimmed.match(/[}>)\]]/g) || []).length;
 
-    // 括号匹配完成后，尝试提取属性
     if (depth <= 0) {
       const propMatch = currentProp.match(
         /^(?:readonly\s+)?(\w+)(\??):\s*(.+?);?\s*$/
@@ -247,7 +203,6 @@ function extractComponentName(source, filePath) {
   if (m) return m[1];
   m = source.match(/export\s+default\s+(\w+)/);
   if (m && !['function', 'memo', 'forwardRef'].includes(m[1])) return m[1];
-  // Fallback: 文件名是 index 时，取父目录名
   const name = basename(filePath, extname(filePath));
   if (name === 'index') return basename(dirname(filePath));
   return name;
@@ -277,25 +232,17 @@ export function processOne(filePath, projectRoot) {
   const componentName = extractComponentName(source, filePath);
   const sourceHash = createHash('sha256').update(source).digest('hex');
 
-  // 使用缓存的策略（main 中已探测过）
-  if (cachedStrategy) {
-    try {
-      const output = cachedStrategy.run(filePath);
-      if (output.trim()) {
-        const parsed = parseDocgenOutput(output);
-        return {
-          componentName, file: filePath,
-          success: true, method: cachedStrategy.method,
-          props: parsed.props, warnings: parsed.warnings,
-          sourceHash,
-        };
-      }
-    } catch {
-      // 单个文件失败，回退到手工提取
-    }
+  const docgenResult = tryReactDocgenTypescript(filePath, projectRoot);
+  if (docgenResult) {
+    return {
+      componentName, file: filePath,
+      success: true, method: 'react-docgen-typescript',
+      props: convertDocgenResult(docgenResult),
+      warnings: [],
+      sourceHash,
+    };
   }
 
-  // 回退：手工提取
   const manual = manualExtractProps(source);
   return {
     componentName, file: filePath,
@@ -318,28 +265,16 @@ function main() {
   }
 
   const { filePaths, projectRoot } = opts;
-
-  // 一次性探测可用策略
-  console.error('Probing react-docgen strategy...');
-  probeStrategy(projectRoot);
-  if (cachedStrategy) {
-    console.error(`  Using: ${cachedStrategy.method}`);
-  } else {
-    console.error('  react-docgen not available, using manual extraction for all');
-  }
-
   const results = [];
 
   for (let i = 0; i < filePaths.length; i++) {
     const fp = filePaths[i];
     console.error(`[${i + 1}/${filePaths.length}] ${fp}`);
-    const result = processOne(fp, projectRoot);
-    results.push(result);
+    results.push(processOne(fp, projectRoot));
   }
 
   const json = JSON.stringify(results, null, 2);
 
-  // 写入文件（如果指定了 --output）
   if (opts.outputPath) {
     const outDir = dirname(opts.outputPath);
     if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
@@ -347,7 +282,6 @@ function main() {
     console.error(`Saved: ${opts.outputPath}`);
   }
 
-  // 始终输出到 stdout
   console.log(json);
 }
 

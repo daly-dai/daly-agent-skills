@@ -9,10 +9,13 @@
  *   node scan-components.mjs --output ./my-list.json
  *
  * 输出: .ai/project-components/.component-list.json
- * 零外部依赖，仅使用 Node 内置模块。
+ *
+ * 依赖: typescript (从目标项目的 node_modules 加载，项目 devDependencies 需含 typescript)
+ * 不可用时降级为手工解析。
  */
 
-import { readdirSync, readFileSync, writeFileSync, statSync, existsSync, mkdirSync } from 'fs';
+import { createRequire } from 'module';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
 import { join, relative, resolve, dirname, basename, extname } from 'path';
 
 // ============================================================
@@ -35,19 +38,16 @@ const EXCLUDE_DIRS = new Set([
   'coverage', '__pycache__', '.turbo', 'out', 'public',
 ]);
 
-const SOURCE_EXTS = new Set(['.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs']);
-const COMPONENT_EXTS = new Set(['.tsx']);
-
 // ============================================================
 // 参数解析
 // ============================================================
 
 function parseArgs(argv) {
-  const opts = { projectRoot: process.cwd(), outputPath: null, patterns: null };
+  const opts = { projectRoot: process.cwd(), outputPath: null, patterns: null, dir: null };
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--dir' && argv[i + 1]) {
-      opts.projectRoot = resolve(argv[++i]);
+      opts.dir = argv[++i];
     } else if (argv[i] === '--output' && argv[i + 1]) {
       opts.outputPath = resolve(argv[++i]);
     } else if (argv[i] === '--patterns' && argv[i + 1]) {
@@ -61,8 +61,23 @@ function parseArgs(argv) {
 }
 
 // ============================================================
-// Glob → Regex 转换
+// 工具函数
 // ============================================================
+
+function normalizePath(p) {
+  return p.replace(/\\/g, '/');
+}
+
+function isPascalCase(name) {
+  return /^[A-Z]/.test(name);
+}
+
+function generateId(name, filePath) {
+  const sanitized = filePath
+    .replace(/[\/\\]/g, '-')
+    .replace(/\.(tsx|ts|jsx|js|mjs|cjs)$/i, '');
+  return `${name}__${sanitized}`;
+}
 
 function globToRegex(pattern) {
   let src = pattern
@@ -74,250 +89,392 @@ function globToRegex(pattern) {
 }
 
 // ============================================================
-// 递归遍历目录
+// TypeScript 加载
 // ============================================================
 
-function walkDir(dir) {
-  const results = [];
-  let entries;
+function loadTypeScript(projectRoot) {
+  const pkgJsonPath = join(projectRoot, 'package.json');
+  if (!existsSync(pkgJsonPath)) {
+    return { ts: null, reason: '无 package.json' };
+  }
   try {
-    entries = readdirSync(dir);
+    const require_ = createRequire(pkgJsonPath);
+    const ts = require_('typescript');
+    return { ts, require_ };
   } catch {
-    return results; // 权限不足，跳过
+    return { ts: null, reason: 'typescript 未安装（devDependencies 中无 typescript）' };
   }
-
-  for (const entry of entries) {
-    if (EXCLUDE_DIRS.has(entry)) continue;
-
-    const fullPath = join(dir, entry);
-    let stat;
-    try {
-      stat = statSync(fullPath);
-    } catch {
-      continue;
-    }
-
-    if (stat.isDirectory()) {
-      results.push(...walkDir(fullPath));
-    } else if (stat.isFile()) {
-      const ext = extname(entry).toLowerCase();
-      if (SOURCE_EXTS.has(ext) || ext === '.tsx') {
-        results.push(fullPath);
-      }
-    }
-  }
-
-  return results;
 }
 
 // ============================================================
-// 从 .tsx 文件中提取组件名
+// Program 创建
 // ============================================================
 
-function extractComponents(filePath) {
-  const content = readFileSync(filePath, 'utf-8');
-  const found = [];
-  const lineCount = content.split('\n').length;
-
-  // 1) export default function ComponentName
-  let m = content.match(/export\s+default\s+function\s+(\w+)/);
-  if (m && m[1][0] === m[1][0].toUpperCase()) {
-    found.push({ name: m[1], isDefault: true });
+function createProgram(ts, projectRoot, opts) {
+  const tsconfigPath = ts.findConfigFile(projectRoot, ts.sys.fileExists, 'tsconfig.json');
+  if (!tsconfigPath) {
+    throw new Error('找不到 tsconfig.json');
   }
 
-  // 2) export default memo(ComponentName) / forwardRef(ComponentName) / ComponentName
-  if (found.length === 0) {
-    m = content.match(/export\s+default\s+(?:memo\s*\(\s*|forwardRef\s*\(\s*)?(\w+)/);
-    if (m && m[1][0] === m[1][0].toUpperCase() && m[1] !== 'function') {
-      found.push({ name: m[1], isDefault: true });
-    }
-  }
-
-  // 3) export const ComponentName / export function ComponentName / export class ComponentName
-  const namedRe = /export\s+(?:const|function|class)\s+(\w+)/g;
-  while ((m = namedRe.exec(content)) !== null) {
-    if (m[1][0] === m[1][0].toUpperCase() && !found.some(c => c.name === m[1])) {
-      found.push({ name: m[1], isDefault: false });
-    }
-  }
-
-  // 4) export { X, Y }
-  m = content.match(/export\s*\{\s*([^}]+)\s*\}/);
-  if (m) {
-    const names = m[1].split(',').map(s => s.trim()).filter(s => s && s[0] === s[0].toUpperCase());
-    for (const name of names) {
-      if (!found.some(c => c.name === name)) {
-        found.push({ name, isDefault: false });
-      }
-    }
-  }
-
-  // 检查是否有子组件 (ComponentName.Sub = ...)
-  const hasSub = /\.\w+\s*=\s*(?:memo\s*\(|forwardRef\s*\(|function|\([\s\S]*?\)\s*=>|React\.)?/m.test(content);
-
-  return { components: found, lineCount, hasSubComponents: hasSub };
-}
-
-// ============================================================
-// 统计 import 引用次数
-// ============================================================
-
-function countReferences(componentName, allFiles) {
-  const re = new RegExp(
-    `import\\s+(?:type\\s+)?(?:\\{[^}]*\\b${componentName}\\b[^}]*\\}|\\b${componentName}\\b)\\s+from`,
-    'g'
+  const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+  const parsedConfig = ts.parseJsonConfigFileContent(
+    configFile.config, ts.sys, dirname(tsconfigPath), {}, tsconfigPath
   );
-  let count = 0;
-  for (const file of allFiles) {
-    try {
-      const content = readFileSync(file, 'utf-8');
-      let m;
-      while ((m = re.exec(content)) !== null) count++;
-    } catch {
-      // 跳过无法读取的文件
+
+  let fileNames = parsedConfig.fileNames.filter(f => {
+    const rel = normalizePath(relative(projectRoot, f));
+    if (rel.startsWith('..')) return false;
+    for (const ed of EXCLUDE_DIRS) {
+      if (rel.split('/').some(seg => seg === ed)) return false;
     }
+    return true;
+  });
+
+  // --dir 过滤
+  if (opts.dir) {
+    const dirAbs = resolve(projectRoot, opts.dir);
+    fileNames = fileNames.filter(f => normalizePath(f).startsWith(normalizePath(dirAbs)));
   }
-  return count;
+
+  // --patterns 过滤
+  const patterns = opts.patterns || DEFAULT_PATTERNS;
+  const regexes = patterns.map(p => globToRegex(p));
+  fileNames = fileNames.filter(f => {
+    const rel = normalizePath(relative(projectRoot, f));
+    return regexes.some(re => re.test(rel));
+  });
+
+  console.error(`Program files: ${fileNames.length} matched`);
+  return ts.createProgram(fileNames, parsedConfig.options);
 }
 
 // ============================================================
-// 主流程
+// 组件提取（AST 遍历）
 // ============================================================
 
-function main() {
-  const opts = parseArgs(process.argv.slice(2));
-  const { projectRoot } = opts;
-  const patterns = opts.patterns || DEFAULT_PATTERNS;
-  const listOutput = opts.outputPath || join(projectRoot, '.ai', 'project-components', '.component-list.json');
+function hasExportModifier(node) {
+  if (!node.modifiers) return false;
+  const ts = node.getSourceFile ? getTS(node) : null;
+  return node.modifiers.some(m => m.kind === 93 /* ExportKeyword */);
+}
 
-  console.log('=== Component Scanner ===');
-  console.log(`Project root : ${projectRoot}`);
-  console.log(`Patterns     : ${patterns.length} patterns`);
-  console.log('');
+function hasDefaultModifier(node) {
+  if (!node.modifiers) return false;
+  return node.modifiers.some(m => m.kind === 88 /* DefaultKeyword */);
+}
 
-  // ---- 收集所有源文件 ----
-  const allSourceFiles = walkDir(projectRoot);
-  const allTsxFiles = allSourceFiles.filter(f => extname(f).toLowerCase() === '.tsx');
+function getTS(node) {
+  // 从节点获取 ts 实例
+  const sourceFile = node.getSourceFile();
+  if (sourceFile && sourceFile.__ts) return sourceFile.__ts;
+  return null;
+}
 
-  console.log(`Source files : ${allSourceFiles.length} total (${allTsxFiles.length} .tsx)`);
+function isExportDeclaration(node, ts) {
+  return node.kind === ts.SyntaxKind.ExportDeclaration;
+}
 
-  // ---- 匹配 pattern ----
-  const regexes = patterns.map(p => globToRegex(p));
-  const matchedFiles = [];
+function isFunctionDeclaration(node, ts) {
+  return node.kind === ts.SyntaxKind.FunctionDeclaration;
+}
 
-  for (const file of allTsxFiles) {
-    const rel = relative(projectRoot, file).replace(/\\/g, '/');
-    for (const re of regexes) {
-      if (re.test(rel)) {
-        matchedFiles.push(file);
-        break;
+function isVariableStatement(node, ts) {
+  return node.kind === ts.SyntaxKind.VariableStatement;
+}
+
+function isClassDeclaration(node, ts) {
+  return node.kind === ts.SyntaxKind.ClassDeclaration;
+}
+
+function isImportDeclaration(node, ts) {
+  return node.kind === ts.SyntaxKind.ImportDeclaration;
+}
+
+function isNamedImports(node, ts) {
+  return node.kind === ts.SyntaxKind.NamedImports;
+}
+
+function isIdentifier(node, ts) {
+  return node.kind === ts.SyntaxKind.Identifier;
+}
+
+function extractComponents(ts, program, projectRoot) {
+  const components = [];       // { name, file, isDefault, barrelExportPaths }
+  const barrelMap = new Map(); // barrelFilePath → [{ name, from }]
+  const seenFiles = new Set(); // 防止重复
+
+  for (const sourceFile of program.getSourceFiles()) {
+    if (sourceFile.isDeclarationFile) continue;
+
+    const filePath = normalizePath(sourceFile.fileName);
+    if (filePath.includes('/node_modules/')) continue;
+
+    const relPath = normalizePath(relative(projectRoot, filePath));
+    if (relPath.startsWith('..')) continue;
+
+    // 跳过排除目录
+    const segments = relPath.split('/');
+    if (segments.some(s => EXCLUDE_DIRS.has(s))) continue;
+
+    // 只处理 .tsx
+    if (!filePath.endsWith('.tsx')) continue;
+
+    const fileComponents = [];
+    const fileBarrelExports = [];
+
+    ts.forEachChild(sourceFile, (node) => {
+      // --- 1) export default function Button / export function Button
+      if (ts.isFunctionDeclaration(node) && node.name && ts.isIdentifier(node.name)) {
+        if (hasExportModifier(node)) {
+          fileComponents.push({
+            name: node.name.text, file: relPath,
+            isDefault: hasDefaultModifier(node),
+          });
+        }
+        return;
+      }
+
+      // --- 2) export default Button = ... (forwardRef / memo / HOC)
+      // 先找 export default 语句
+      if (ts.isExportAssignment(node) && !node.isExportEquals) {
+        // export default ButtonName
+        if (ts.isIdentifier(node.expression)) {
+          fileComponents.push({
+            name: node.expression.text, file: relPath, isDefault: true,
+          });
+        }
+        // export default memo(ButtonName) / forwardRef(ButtonName)
+        else if (ts.isCallExpression(node.expression)) {
+          const callArgs = node.expression;
+          if (ts.isIdentifier(callArgs.expression)) {
+            // 检查是否是 memo/forwardRef 等
+            const wrapperName = callArgs.expression.text;
+            if (['memo', 'forwardRef', 'lazy'].includes(wrapperName) && callArgs.arguments.length > 0) {
+              const firstArg = callArgs.arguments[0];
+              if (ts.isIdentifier(firstArg)) {
+                fileComponents.push({
+                  name: firstArg.text, file: relPath, isDefault: true,
+                });
+              } else if (ts.isArrowFunction(firstArg) || ts.isFunctionExpression(firstArg)) {
+                // export default memo(() => {...}) — 匿名，用文件名
+              }
+            }
+          }
+        }
+        return;
+      }
+
+      // --- 3) export const Button = ...
+      if (ts.isVariableStatement(node) && hasExportModifier(node)) {
+        for (const decl of node.declarationList.declarations) {
+          if (ts.isIdentifier(decl.name) && isPascalCase(decl.name.text)) {
+            fileComponents.push({
+              name: decl.name.text, file: relPath,
+              isDefault: false,
+            });
+          }
+        }
+        return;
+      }
+
+      // --- 4) export class Button
+      if (ts.isClassDeclaration(node) && node.name && ts.isIdentifier(node.name)) {
+        if (hasExportModifier(node)) {
+          fileComponents.push({
+            name: node.name.text, file: relPath,
+            isDefault: hasDefaultModifier(node),
+          });
+        }
+        return;
+      }
+
+      // --- 5) export { Button } from './Button' (桶文件)
+      if (ts.isExportDeclaration(node) && node.exportClause && node.moduleSpecifier) {
+        if (ts.isNamedExports(node.exportClause)) {
+          for (const el of node.exportClause.elements) {
+            const exportedName = el.name.text;
+            const fromPath = node.moduleSpecifier.text;
+            fileBarrelExports.push({ name: exportedName, from: fromPath });
+          }
+        }
+        return;
+      }
+
+      // --- 6) export { X } (重导出本文件符号)
+      if (ts.isExportDeclaration(node) && node.exportClause && !node.moduleSpecifier) {
+        if (ts.isNamedExports(node.exportClause)) {
+          for (const el of node.exportClause.elements) {
+            fileComponents.push({
+              name: el.name.text, file: relPath, isDefault: false,
+            });
+          }
+        }
+        return;
+      }
+    });
+
+    // 收集桶导出
+    if (fileBarrelExports.length > 0) {
+      barrelMap.set(relPath, fileBarrelExports);
+    }
+
+    // 收集组件
+    for (const c of fileComponents) {
+      if (!seenFiles.has(c.name + '::' + c.file)) {
+        seenFiles.add(c.name + '::' + c.file);
+        components.push({ ...c, refs: 0, barrelExportPaths: [] });
       }
     }
-  }
 
-  console.log(`Matched      : ${matchedFiles.length} component files`);
-
-  if (matchedFiles.length === 0) {
-    console.log('');
-    console.log('No component files matched any pattern.');
-    console.log('Try: node scan-components.mjs --dir <path>');
-    console.log('  or: node scan-components.mjs --patterns "your/glob/**/*.tsx"');
-    process.exit(1);
-  }
-
-  // ---- 按目录分组展示 ----
-  const dirCounts = {};
-  for (const f of matchedFiles) {
-    const d = dirname(relative(projectRoot, f)).replace(/\\/g, '/');
-    dirCounts[d] = (dirCounts[d] || 0) + 1;
-  }
-  console.log('');
-  console.log('By directory:');
-  for (const [dir, count] of Object.entries(dirCounts).sort()) {
-    console.log(`  ${dir}/  (${count} files)`);
-  }
-
-  // ---- 提取组件 ----
-  console.log('');
-  console.log('Extracting component names...');
-
-  const components = [];
-
-  for (const file of matchedFiles) {
-    const relPath = relative(projectRoot, file).replace(/\\/g, '/');
-    try {
-      const { components: extracted, lineCount, hasSubComponents } = extractComponents(file);
-
-      if (extracted.length === 0) {
-        // fallback: 用文件名作为组件名
-        const name = basename(file, '.tsx');
-        components.push({ name, file: relPath, refs: 0, lineCount, hasSubComponents: false });
-      } else {
-        for (const c of extracted) {
-          components.push({ name: c.name, file: relPath, refs: 0, lineCount, hasSubComponents });
+    // fallback: 文件没有任何导出声明，用文件名
+    if (fileComponents.length === 0) {
+      const name = basename(filePath, '.tsx');
+      if (name !== 'index' && isPascalCase(name)) {
+        if (!seenFiles.has(name + '::' + relPath)) {
+          seenFiles.add(name + '::' + relPath);
+          components.push({ name, file: relPath, isDefault: false, refs: 0, barrelExportPaths: [] });
         }
       }
-    } catch (err) {
-      console.error(`  SKIP ${relPath} — ${err.message}`);
     }
   }
 
-  console.log(`Found ${components.length} components`);
-
-  // ---- 统计引用 ----
-  console.log('');
-  console.log('Counting references...');
-
-  const uniqueNames = [...new Set(components.map(c => c.name))];
-  let done = 0;
-  for (const name of uniqueNames) {
-    const refs = countReferences(name, allSourceFiles);
-    for (const c of components) {
-      if (c.name === name) c.refs = refs;
-    }
-    done++;
-    if (done % 10 === 0 || done === uniqueNames.length) {
-      console.log(`  ${done}/${uniqueNames.length} names counted`);
+  // --- 关联桶文件 ---
+  for (const [barrelPath, exports] of barrelMap) {
+    const barrelDir = dirname(barrelPath);
+    for (const exp of exports) {
+      const target = components.find(
+        c => c.name === exp.name && dirname(c.file) === barrelDir
+      );
+      if (target) {
+        if (!target.barrelExportPaths.includes(barrelPath)) {
+          target.barrelExportPaths.push(barrelPath);
+        }
+      }
     }
   }
 
-  // ---- 优先级判定 ----
-  // 规则按顺序套用，命中即停：
-  //   1. refs >= 8                         → high
-  //   2. refs >= 3                         → medium
-  //   3. refs > 0 且有子组件或行数 > 300    → medium（有人用的大组件，至少值得关注）
-  //   4. 其余                              → low
+  return { components, barrelMap };
+}
+
+// ============================================================
+// 引用计数（AST + 模块解析）
+// ============================================================
+
+function isBareSpecifier(specifier) {
+  return !specifier.startsWith('.') && !specifier.startsWith('/') && !specifier.startsWith('@/');
+}
+
+function countReferences(ts, program, components, projectRoot) {
+  // 构建查找表：文件路径 → component
+  const fileToComponent = new Map();
+  for (const c of components) {
+    const absPath = normalizePath(resolve(projectRoot, c.file));
+    fileToComponent.set(absPath, c);
+  }
+
+  // 桶文件解析表：桶文件路径 → 目标组件
+  const barrelToComponent = new Map();
+  for (const c of components) {
+    for (const bp of c.barrelExportPaths || []) {
+      const absBarrel = normalizePath(resolve(projectRoot, bp));
+      barrelToComponent.set(absBarrel, c);
+    }
+  }
+
+  // 引用计数器（使用 Set 按来源文件去重）
+  const refSets = new Map(); // component → Set<importingFileName>
+  for (const c of components) refSets.set(c, new Set());
+
+  const compilerOptions = program.getCompilerOptions();
+
+  for (const sourceFile of program.getSourceFiles()) {
+    if (sourceFile.isDeclarationFile) continue;
+
+    const importingFile = normalizePath(sourceFile.fileName);
+    if (importingFile.includes('/node_modules/')) continue;
+
+    ts.forEachChild(sourceFile, (node) => {
+      if (!ts.isImportDeclaration(node)) return;
+      if (!node.importClause?.namedBindings) return;
+      if (!ts.isNamedImports(node.importClause.namedBindings)) return;
+
+      const specifier = node.moduleSpecifier.text;
+
+      // 过滤 bare specifier（三方包）
+      if (isBareSpecifier(specifier)) return;
+
+      // TypeScript 模块解析
+      const resolved = ts.resolveModuleName(
+        specifier,
+        sourceFile.fileName,
+        compilerOptions,
+        ts.sys
+      );
+
+      if (!resolved.resolvedModule?.resolvedFileName) return;
+      const targetFile = normalizePath(resolved.resolvedModule.resolvedFileName);
+
+      // 找到目标组件：直接匹配文件或桶文件
+      let targetComp = fileToComponent.get(targetFile);
+      if (!targetComp) targetComp = barrelToComponent.get(targetFile);
+      if (!targetComp) return;
+
+      // 检查引入的具体名称是否匹配
+      for (const el of node.importClause.namedBindings.elements) {
+        if (el.name.text === targetComp.name) {
+          refSets.get(targetComp).add(importingFile);
+        }
+      }
+    });
+  }
+
+  for (const c of components) {
+    c.refs = refSets.has(c) ? refSets.get(c).size : 0;
+  }
+}
+
+// ============================================================
+// 优先级
+// ============================================================
+
+function assignPriorities(components) {
   for (const c of components) {
     if (c.refs >= 8) {
       c.priority = 'high';
     } else if (c.refs >= 3) {
       c.priority = 'medium';
-    } else if (c.refs > 0 && (c.hasSubComponents || c.lineCount > 300)) {
-      c.priority = 'medium';
     } else {
       c.priority = 'low';
     }
-    // 清理内部字段
-    delete c.lineCount;
-    delete c.hasSubComponents;
-    c.status = 'pending';
   }
+}
 
-  // ---- 分组排序 ----
+function groupAndSort(components) {
   const grouped = { high: [], medium: [], low: [] };
   for (const c of components) {
-    grouped[c.priority].push({ name: c.name, file: c.file, refs: c.refs, status: c.status });
-    delete c.priority;
+    grouped[c.priority].push({
+      id: c.id,
+      name: c.name,
+      file: c.file,
+      refs: c.refs,
+      status: 'pending',
+      barrelExportPaths: c.barrelExportPaths || [],
+    });
   }
   for (const g of Object.values(grouped)) {
     g.sort((a, b) => b.refs - a.refs);
   }
+  return grouped;
+}
 
-  // ---- 写入 ----
+// ============================================================
+// 输出
+// ============================================================
+
+function writeOutput(grouped, opts, projectRoot) {
+  const listOutput = opts.outputPath || join(projectRoot, '.ai', 'project-components', '.component-list.json');
   const outDir = dirname(listOutput);
-  if (!existsSync(outDir)) {
-    mkdirSync(outDir, { recursive: true });
-  }
+  if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
   const output = {
     createdAt: new Date().toISOString().split('T')[0],
@@ -328,18 +485,84 @@ function main() {
 
   writeFileSync(listOutput, JSON.stringify(output, null, 2), 'utf-8');
 
-  // ---- 汇总 ----
-  console.log('');
-  console.log('=== Done ===');
-  console.log(`  High   : ${grouped.high.length}`);
-  console.log(`  Medium : ${grouped.medium.length}`);
-  console.log(`  Low    : ${grouped.low.length}`);
-  console.log(`  Output : ${listOutput}`);
+  console.error('');
+  console.error('=== Done ===');
+  console.error(`  High   : ${grouped.high.length}`);
+  console.error(`  Medium : ${grouped.medium.length}`);
+  console.error(`  Low    : ${grouped.low.length}`);
+  console.error(`  Output : ${listOutput}`);
 
-  if (components.length > 30) {
-    console.log('');
-    console.log('WARNING: More than 30 components found. Consider narrowing the scan scope with --dir.');
+  if (grouped.high.length + grouped.medium.length + grouped.low.length > 30) {
+    console.error('');
+    console.error('WARNING: More than 30 components found. Consider narrowing the scan scope with --dir.');
   }
+}
+
+// ============================================================
+// 主流程
+// ============================================================
+
+function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  const { projectRoot } = opts;
+
+  console.error('=== Component Scanner (AST) ===');
+  console.error(`Project root : ${projectRoot}`);
+  console.error('');
+
+  // 1. 加载 TypeScript
+  const { ts, reason } = loadTypeScript(projectRoot);
+  if (!ts) {
+    console.error(`ERROR: ${reason}`);
+    console.error('This skill requires TypeScript to be installed in the project devDependencies.');
+    console.error('For non-TypeScript projects, use the fallback version: component-ai-docs-fallback');
+    process.exit(1);
+  }
+
+  // 2. 创建 Program
+  let program;
+  try {
+    program = createProgram(ts, projectRoot, opts);
+  } catch (err) {
+    console.error(`ERROR: ${err.message}`);
+    process.exit(1);
+  }
+
+  // 3. 提取组件
+  console.error('Extracting components...');
+  const { components } = extractComponents(ts, program, projectRoot);
+  console.error(`Found ${components.length} component exports`);
+
+  if (components.length === 0) {
+    console.error('');
+    console.error('No component files matched any pattern.');
+    console.error('Try: node scan-components.mjs --dir <path>');
+    console.error('  or: node scan-components.mjs --patterns "your/glob/**/*.tsx"');
+    process.exit(1);
+  }
+
+  // 4. 引用计数
+  console.error('Counting references...');
+  let done = 0;
+  countReferences(ts, program, components, projectRoot);
+  for (const c of components) {
+    done++;
+    if (done % 10 === 0 || done === components.length) {
+      console.error(`  ${done}/${components.length} components counted`);
+    }
+  }
+
+  // 5. 优先级
+  assignPriorities(components);
+
+  // 6. 生成 id
+  for (const c of components) {
+    c.id = generateId(c.name, c.file);
+  }
+
+  // 7. 分组排序 + 输出
+  const grouped = groupAndSort(components);
+  writeOutput(grouped, opts, projectRoot);
 }
 
 main();
